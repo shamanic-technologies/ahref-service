@@ -1,0 +1,435 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ahref Service",
+    "version": "1.0.0",
+    "description": "Manages Ahrefs domain authority and traffic data for press outlets"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [],
+  "components": {
+    "schemas": {
+      "AhrefDataType": {
+        "type": "string",
+        "enum": [
+          "authority",
+          "traffic"
+        ]
+      },
+      "UpdateDomainRatingBody": {
+        "type": "object",
+        "properties": {
+          "dataType": {
+            "$ref": "#/components/schemas/AhrefDataType"
+          },
+          "dataCapturedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "urlInput": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "rawData": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "authorityDomainRating": {
+            "type": "integer",
+            "nullable": true
+          },
+          "authorityUrlRating": {
+            "type": "integer",
+            "nullable": true
+          },
+          "authorityBacklinks": {
+            "type": "integer",
+            "nullable": true
+          },
+          "authorityRefdomains": {
+            "type": "integer",
+            "nullable": true
+          },
+          "authorityDofollowBacklinks": {
+            "type": "integer",
+            "nullable": true
+          },
+          "authorityDofollowRefdomains": {
+            "type": "integer",
+            "nullable": true
+          },
+          "trafficMonthlyAvg": {
+            "type": "integer",
+            "nullable": true
+          },
+          "costMonthlyAvg": {
+            "type": "number",
+            "nullable": true
+          },
+          "trafficHistory": {
+            "nullable": true
+          },
+          "trafficTopPages": {
+            "nullable": true
+          },
+          "trafficTopCountries": {
+            "nullable": true
+          },
+          "trafficTopKeywords": {
+            "nullable": true
+          },
+          "overallSearchTraffic": {
+            "type": "number",
+            "nullable": true
+          },
+          "overallSearchTrafficHistory": {
+            "nullable": true
+          },
+          "overallSearchTrafficValue": {
+            "type": "number",
+            "nullable": true
+          },
+          "overallSearchTrafficValueHistory": {
+            "nullable": true
+          },
+          "overallSearchTrafficByCountry": {
+            "nullable": true
+          },
+          "trafficByCountry": {
+            "nullable": true
+          },
+          "overallSearchTrafficKeywords": {
+            "nullable": true
+          }
+        },
+        "required": [
+          "dataType",
+          "dataCapturedAt",
+          "rawData"
+        ]
+      },
+      "DrStatusResponse": {
+        "type": "object",
+        "properties": {
+          "outletId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "drToUpdate": {
+            "type": "boolean"
+          },
+          "drUpdateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "drLatestSearchDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "latestValidDr": {
+            "type": "integer",
+            "nullable": true
+          },
+          "latestValidDrDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "needsUpdate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "outletId",
+          "drToUpdate",
+          "drUpdateReason",
+          "drLatestSearchDate",
+          "latestValidDr",
+          "latestValidDrDate",
+          "needsUpdate"
+        ]
+      },
+      "LowDrResponse": {
+        "type": "object",
+        "properties": {
+          "outletId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "drToUpdate": {
+            "type": "boolean"
+          },
+          "drUpdateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "drLatestSearchDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "latestValidDr": {
+            "type": "integer",
+            "nullable": true
+          },
+          "latestValidDrDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "needsUpdate": {
+            "type": "boolean"
+          },
+          "hasLowDomainRating": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "required": [
+          "outletId",
+          "drToUpdate",
+          "drUpdateReason",
+          "drLatestSearchDate",
+          "latestValidDr",
+          "latestValidDrDate",
+          "needsUpdate",
+          "hasLowDomainRating"
+        ]
+      }
+    },
+    "parameters": {},
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "ahref-service"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outlets/dr-status": {
+      "get": {
+        "summary": "Get DR status for a list of outlet IDs",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated outlet UUIDs"
+            },
+            "required": true,
+            "description": "Comma-separated outlet UUIDs",
+            "name": "outletIds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DR status for requested outlets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outlets/dr-stale": {
+      "get": {
+        "summary": "All outlets that need DR refresh",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stale DR outlets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outlets/{outletId}/domain-rating": {
+      "patch": {
+        "summary": "Store new Ahrefs data for an outlet",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "outletId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDomainRatingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ahrefs data stored successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "outletId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "outletId"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outlets/low-domain-rating": {
+      "get": {
+        "summary": "Outlets with DR < 10",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Low DR outlets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LowDrResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outlets/campaign-categories-dr-status": {
+      "get": {
+        "summary": "DR status for outlets in a campaign (cross-service with outlets-service)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Campaign UUID"
+            },
+            "required": true,
+            "description": "Campaign UUID",
+            "name": "campaignId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DR status for campaign outlets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
