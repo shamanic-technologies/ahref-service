@@ -123,7 +123,7 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
 // CLI entry point
 if (require.main === module) {
   const { Pool: PgPool } = require("pg");
-  const pool = new PgPool({ connectionString: process.env.DATABASE_URL });
+  const pool = new PgPool({ connectionString: process.env.AHREF_SERVICE_DATABASE_URL });
   runMigrations(pool)
     .then(() => pool.end())
     .catch((err: unknown) => {
