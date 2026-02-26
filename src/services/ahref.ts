@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { z } from "zod";
 import { updateDomainRatingBodySchema } from "../schemas/apify-ahref";
+import { Identity } from "../middleware/identity";
 
 type UpdateDomainRatingBody = z.infer<typeof updateDomainRatingBodySchema>;
 
@@ -64,7 +65,8 @@ export const getLowDomainRating = async (pool: Pool) => {
 export const updateDomainRating = async (
   pool: Pool,
   outletId: string,
-  body: UpdateDomainRatingBody
+  body: UpdateDomainRatingBody,
+  identity?: Identity
 ) => {
   const client = await pool.connect();
   try {
@@ -80,8 +82,9 @@ export const updateDomainRating = async (
         traffic_top_countries, traffic_top_keywords, overall_search_traffic,
         overall_search_traffic_history, overall_search_traffic_value,
         overall_search_traffic_value_history, overall_search_traffic_by_country,
-        traffic_by_country, overall_search_traffic_keywords
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+        traffic_by_country, overall_search_traffic_keywords,
+        org_id, user_id
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
       RETURNING id`,
       [
         body.urlInput ?? "",
@@ -117,6 +120,8 @@ export const updateDomainRating = async (
         body.overallSearchTrafficKeywords
           ? JSON.stringify(body.overallSearchTrafficKeywords)
           : null,
+        identity?.orgId ?? null,
+        identity?.userId ?? null,
       ]
     );
 

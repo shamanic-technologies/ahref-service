@@ -9,6 +9,7 @@ import {
   updateDomainRating,
 } from "../services/ahref";
 import { createOutletsClient } from "../services/outlets-client";
+import { extractIdentity } from "../middleware/identity";
 
 export const createOutletsRouter = (outletsConfig: {
   baseUrl: string;
@@ -73,7 +74,8 @@ export const createOutletsRouter = (outletsConfig: {
           return;
         }
 
-        const result = await updateDomainRating(getPool(), outletId, parsed.data);
+        const identity = extractIdentity(req);
+        const result = await updateDomainRating(getPool(), outletId, parsed.data, identity);
         res.status(201).json(result);
       } catch (error) {
         console.error("Error updating domain rating:", error);
