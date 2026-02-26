@@ -13,6 +13,12 @@ import {
 
 const registry = new OpenAPIRegistry();
 
+// Shared optional identity headers for all secured endpoints
+const identityHeaders = z.object({
+  "x-org-id": z.string().uuid().optional().describe("Org UUID from client-service"),
+  "x-user-id": z.string().uuid().optional().describe("User UUID from client-service"),
+});
+
 // Register schemas
 registry.register("UpdateDomainRatingBody", updateDomainRatingBodySchema);
 registry.register("DrStatusResponse", drStatusResponseSchema);
@@ -44,6 +50,7 @@ registry.registerPath({
   path: "/outlets/dr-status",
   summary: "Get DR status for a list of outlet IDs",
   request: {
+    headers: identityHeaders,
     query: z.object({
       outletIds: z.string().describe("Comma-separated outlet UUIDs"),
     }),
@@ -66,6 +73,9 @@ registry.registerPath({
   method: "get",
   path: "/outlets/dr-stale",
   summary: "All outlets that need DR refresh",
+  request: {
+    headers: identityHeaders,
+  },
   responses: {
     200: {
       description: "Stale DR outlets",
@@ -85,6 +95,7 @@ registry.registerPath({
   path: "/outlets/{outletId}/domain-rating",
   summary: "Store new Ahrefs data for an outlet",
   request: {
+    headers: identityHeaders,
     params: z.object({ outletId: z.string().uuid() }),
     body: {
       content: {
@@ -115,6 +126,9 @@ registry.registerPath({
   method: "get",
   path: "/outlets/low-domain-rating",
   summary: "Outlets with DR < 10",
+  request: {
+    headers: identityHeaders,
+  },
   responses: {
     200: {
       description: "Low DR outlets",
@@ -135,6 +149,7 @@ registry.registerPath({
   summary:
     "DR status for outlets in a campaign (cross-service with outlets-service)",
   request: {
+    headers: identityHeaders,
     query: z.object({
       campaignId: z.string().uuid().describe("Campaign UUID"),
     }),

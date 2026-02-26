@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS ahref_outlets (
 CREATE INDEX IF NOT EXISTS idx_ahref_outlets_outlet ON ahref_outlets(outlet_id);
 CREATE INDEX IF NOT EXISTS idx_ahref_outlets_apify ON ahref_outlets(apify_ahref_id);
 
+-- Add optional org/user identity columns for traceability
+ALTER TABLE apify_ahref ADD COLUMN IF NOT EXISTS org_id UUID;
+ALTER TABLE apify_ahref ADD COLUMN IF NOT EXISTS user_id UUID;
+
 -- View: v_outlets_domain_rating_to_update
 CREATE OR REPLACE VIEW v_outlets_domain_rating_to_update AS
 WITH outlet_dr_searches AS (

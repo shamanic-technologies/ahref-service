@@ -177,6 +177,78 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
     expect(queryTexts.some((t: string) => t.includes("INSERT INTO ahref_outlets"))).toBe(true);
   });
 
+  it("stores org_id and user_id from identity headers", async () => {
+    const orgId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const userId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+    const res = await request(app)
+      .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
+      .set("x-api-key", API_KEY)
+      .set("x-org-id", orgId)
+      .set("x-user-id", userId)
+      .send({
+        dataType: "authority",
+        dataCapturedAt: "2025-06-01T00:00:00Z",
+        rawData: { dr: 50 },
+        authorityDomainRating: 50,
+      });
+    expect(res.status).toBe(201);
+
+    const client = getMockClient();
+    const insertCall = client.query.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && c[0].includes("INSERT INTO apify_ahref")
+    );
+    expect(insertCall).toBeDefined();
+    const values = insertCall![1] as unknown[];
+    // org_id is $26, user_id is $27 (0-indexed: 25, 26)
+    expect(values[25]).toBe(orgId);
+    expect(values[26]).toBe(userId);
+  });
+
+  it("stores null org_id/user_id when identity headers are absent", async () => {
+    const res = await request(app)
+      .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
+      .set("x-api-key", API_KEY)
+      .send({
+        dataType: "authority",
+        dataCapturedAt: "2025-06-01T00:00:00Z",
+        rawData: { dr: 45 },
+        authorityDomainRating: 45,
+      });
+    expect(res.status).toBe(201);
+
+    const client = getMockClient();
+    const insertCall = client.query.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && c[0].includes("INSERT INTO apify_ahref")
+    );
+    const values = insertCall![1] as unknown[];
+    expect(values[25]).toBeNull();
+    expect(values[26]).toBeNull();
+  });
+
+  it("ignores invalid (non-UUID) identity headers", async () => {
+    const res = await request(app)
+      .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
+      .set("x-api-key", API_KEY)
+      .set("x-org-id", "not-a-uuid")
+      .set("x-user-id", "also-not-a-uuid")
+      .send({
+        dataType: "authority",
+        dataCapturedAt: "2025-06-01T00:00:00Z",
+        rawData: { dr: 45 },
+        authorityDomainRating: 45,
+      });
+    expect(res.status).toBe(201);
+
+    const client = getMockClient();
+    const insertCall = client.query.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && c[0].includes("INSERT INTO apify_ahref")
+    );
+    const values = insertCall![1] as unknown[];
+    expect(values[25]).toBeNull();
+    expect(values[26]).toBeNull();
+  });
+
   it("stores traffic data type", async () => {
     const res = await request(app)
       .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
