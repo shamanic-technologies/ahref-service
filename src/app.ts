@@ -2,6 +2,7 @@ import express from "express";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { authMiddleware } from "./middleware/auth";
+import { requireIdentity } from "./middleware/identity";
 import { healthRouter } from "./routes/health";
 import { createOutletsRouter } from "./routes/outlets";
 
@@ -30,9 +31,10 @@ export const createApp = (config: AppConfig) => {
     res.json(spec);
   });
 
-  // Auth-protected routes
+  // Auth-protected routes — require identity headers
   app.use(
     authMiddleware(config.apiKey),
+    requireIdentity,
     createOutletsRouter({
       baseUrl: config.outletsServiceUrl,
       apiKey: config.outletsServiceApiKey,

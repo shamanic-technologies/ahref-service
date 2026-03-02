@@ -6,8 +6,6 @@ const envSchema = z.object({
   AHREF_SERVICE_API_KEY: z.string(),
   OUTLETS_SERVICE_URL: z.string(),
   OUTLETS_SERVICE_API_KEY: z.string(),
-  RUNS_SERVICE_URL: z.string().optional(),
-  RUNS_SERVICE_API_KEY: z.string().optional(),
 });
 
 export type Config = z.infer<typeof envSchema>;
