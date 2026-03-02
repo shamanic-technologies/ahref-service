@@ -275,7 +275,7 @@
               "format": "uuid",
               "description": "Org UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "Org UUID from client-service",
             "name": "x-org-id",
             "in": "header"
@@ -286,7 +286,7 @@
               "format": "uuid",
               "description": "User UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
@@ -324,7 +324,7 @@
               "format": "uuid",
               "description": "Org UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "Org UUID from client-service",
             "name": "x-org-id",
             "in": "header"
@@ -335,7 +335,7 @@
               "format": "uuid",
               "description": "User UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
@@ -382,7 +382,7 @@
               "format": "uuid",
               "description": "Org UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "Org UUID from client-service",
             "name": "x-org-id",
             "in": "header"
@@ -393,7 +393,7 @@
               "format": "uuid",
               "description": "User UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
@@ -451,7 +451,7 @@
               "format": "uuid",
               "description": "Org UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "Org UUID from client-service",
             "name": "x-org-id",
             "in": "header"
@@ -462,7 +462,7 @@
               "format": "uuid",
               "description": "User UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
@@ -511,7 +511,7 @@
               "format": "uuid",
               "description": "Org UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "Org UUID from client-service",
             "name": "x-org-id",
             "in": "header"
@@ -522,7 +522,7 @@
               "format": "uuid",
               "description": "User UUID from client-service"
             },
-            "required": false,
+            "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"

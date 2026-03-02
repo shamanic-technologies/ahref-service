@@ -66,7 +66,7 @@ export const updateDomainRating = async (
   pool: Pool,
   outletId: string,
   body: UpdateDomainRatingBody,
-  identity?: Identity
+  identity: Identity
 ) => {
   const client = await pool.connect();
   try {
@@ -120,8 +120,8 @@ export const updateDomainRating = async (
         body.overallSearchTrafficKeywords
           ? JSON.stringify(body.overallSearchTrafficKeywords)
           : null,
-        identity?.orgId ?? null,
-        identity?.userId ?? null,
+        identity.orgId,
+        identity.userId,
       ]
     );
 

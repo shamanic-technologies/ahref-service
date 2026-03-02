@@ -13,10 +13,10 @@ import {
 
 const registry = new OpenAPIRegistry();
 
-// Shared optional identity headers for all secured endpoints
+// Shared required identity headers for all secured endpoints
 const identityHeaders = z.object({
-  "x-org-id": z.string().uuid().optional().describe("Org UUID from client-service"),
-  "x-user-id": z.string().uuid().optional().describe("User UUID from client-service"),
+  "x-org-id": z.string().uuid().describe("Org UUID from client-service"),
+  "x-user-id": z.string().uuid().describe("User UUID from client-service"),
 });
 
 // Register schemas
