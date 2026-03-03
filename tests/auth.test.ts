@@ -6,6 +6,7 @@ import { clearMocks } from "./setup";
 const API_KEY = "test-api-key";
 const ORG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const USER_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const RUN_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 
 const app = createApp({
   apiKey: API_KEY,
@@ -36,7 +37,8 @@ describe("Auth middleware", () => {
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY)
       .set("x-org-id", ORG_ID)
-      .set("x-user-id", USER_ID);
+      .set("x-user-id", USER_ID)
+      .set("x-run-id", RUN_ID);
     expect(res.status).toBe(200);
   });
 });
@@ -50,7 +52,8 @@ describe("Identity middleware", () => {
     const res = await request(app)
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY)
-      .set("x-user-id", USER_ID);
+      .set("x-user-id", USER_ID)
+      .set("x-run-id", RUN_ID);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-org-id/);
   });
@@ -59,7 +62,8 @@ describe("Identity middleware", () => {
     const res = await request(app)
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID);
+      .set("x-org-id", ORG_ID)
+      .set("x-run-id", RUN_ID);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-user-id/);
   });
@@ -69,7 +73,8 @@ describe("Identity middleware", () => {
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY)
       .set("x-org-id", "not-a-uuid")
-      .set("x-user-id", USER_ID);
+      .set("x-user-id", USER_ID)
+      .set("x-run-id", RUN_ID);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-org-id/);
   });
@@ -79,12 +84,34 @@ describe("Identity middleware", () => {
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY)
       .set("x-org-id", ORG_ID)
-      .set("x-user-id", "not-a-uuid");
+      .set("x-user-id", "not-a-uuid")
+      .set("x-run-id", RUN_ID);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-user-id/);
   });
 
-  it("rejects requests missing both identity headers", async () => {
+  it("rejects requests missing x-run-id", async () => {
+    const res = await request(app)
+      .get("/outlets/dr-stale")
+      .set("x-api-key", API_KEY)
+      .set("x-org-id", ORG_ID)
+      .set("x-user-id", USER_ID);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/x-run-id/);
+  });
+
+  it("rejects requests with invalid x-run-id", async () => {
+    const res = await request(app)
+      .get("/outlets/dr-stale")
+      .set("x-api-key", API_KEY)
+      .set("x-org-id", ORG_ID)
+      .set("x-user-id", USER_ID)
+      .set("x-run-id", "not-a-uuid");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/x-run-id/);
+  });
+
+  it("rejects requests missing all identity headers", async () => {
     const res = await request(app)
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY);
