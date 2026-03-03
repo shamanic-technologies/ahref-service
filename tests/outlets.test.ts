@@ -12,11 +12,12 @@ const app = createApp({
 
 const ORG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const USER_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const RUN_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const OUTLET_ID_1 = "11111111-1111-1111-1111-111111111111";
 const OUTLET_ID_2 = "22222222-2222-2222-2222-222222222222";
 
 const withIdentity = (req: request.Test) =>
-  req.set("x-org-id", ORG_ID).set("x-user-id", USER_ID);
+  req.set("x-org-id", ORG_ID).set("x-user-id", USER_ID).set("x-run-id", RUN_ID);
 
 describe("GET /outlets/dr-status", () => {
   beforeEach(() => {

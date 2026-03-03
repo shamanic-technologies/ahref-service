@@ -290,6 +290,17 @@
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)"
+            },
+            "required": true,
+            "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -338,6 +349,17 @@
             "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)"
+            },
+            "required": true,
+            "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],
@@ -396,6 +418,17 @@
             "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)"
+            },
+            "required": true,
+            "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],
@@ -466,6 +499,17 @@
             "description": "User UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)"
+            },
+            "required": true,
+            "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -525,6 +569,17 @@
             "required": true,
             "description": "User UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)"
+            },
+            "required": true,
+            "description": "Caller's run ID from runs-service (used as parentRunId when creating own run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],

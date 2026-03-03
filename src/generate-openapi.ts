@@ -17,6 +17,7 @@ const registry = new OpenAPIRegistry();
 const identityHeaders = z.object({
   "x-org-id": z.string().uuid().describe("Org UUID from client-service"),
   "x-user-id": z.string().uuid().describe("User UUID from client-service"),
+  "x-run-id": z.string().uuid().describe("Caller's run ID from runs-service (used as parentRunId when creating own run)"),
 });
 
 // Register schemas
