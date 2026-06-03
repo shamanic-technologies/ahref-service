@@ -37,6 +37,18 @@ export const updateDomainRatingBodySchema = z
   })
   .openapi("UpdateDomainRatingBody");
 
+// Body for POST /orgs/domains/dr-compute — domains to scrape DR for, on demand.
+export const drComputeBodySchema = z
+  .object({
+    domains: z
+      .array(z.string().min(1))
+      .min(1)
+      .describe(
+        "Domains to fetch DR for. Normalized server-side (www stripped, case-folded); other subdomains kept distinct."
+      ),
+  })
+  .openapi("DrComputeBody");
+
 export const drStatusResponseSchema = z
   .object({
     domain: z.string(),

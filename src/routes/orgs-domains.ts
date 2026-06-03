@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
 import { getPool } from "../db";
 import { getDrStatus } from "../services/ahref";
+import { computeDr } from "../services/dr-compute";
+import { drComputeBodySchema } from "../schemas/apify-ahref";
 import { normalizeDomain } from "../lib/domain";
 
 /**
@@ -46,6 +48,32 @@ export const createOrgsDomainsRouter = () => {
     } catch (error) {
       console.error("[ahref-service] Error fetching DR status:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /orgs/domains/dr-compute — on-demand: scrape Ahrefs (DR) for the given
+  // domains via Apify, declare cost + authorize, persist, return the DR. This is
+  // the only metered/spending endpoint; dr-status stays a pure read.
+  router.post("/dr-compute", async (req: Request, res: Response) => {
+    const parsed = drComputeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const result = await computeDr(getPool(), parsed.data.domains, req.orgContext!);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // An unusable domain is a client error (400); everything else is a
+      // downstream / cost / scrape failure → fail loud as 502.
+      if (message.includes("normalizeDomain")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      console.error("[ahref-service] Error computing DR:", error);
+      res.status(502).json({ error: "Failed to compute DR", detail: message });
     }
   });
 
