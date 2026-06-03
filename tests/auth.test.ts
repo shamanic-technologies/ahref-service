@@ -5,8 +5,6 @@ import { clearMocks } from "./setup";
 
 const API_KEY = "test-api-key";
 const ORG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-const USER_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-const RUN_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 
 const app = createApp({
   apiKey: API_KEY,
@@ -20,101 +18,53 @@ describe("Auth middleware", () => {
   });
 
   it("rejects requests without x-api-key", async () => {
-    const res = await request(app).get("/outlets/dr-stale");
+    const res = await request(app).get("/internal/outlets/dr-stale");
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/Unauthorized/);
   });
 
   it("rejects requests with wrong x-api-key", async () => {
     const res = await request(app)
-      .get("/outlets/dr-stale")
+      .get("/internal/outlets/dr-stale")
       .set("x-api-key", "wrong-key");
     expect(res.status).toBe(401);
   });
 
-  it("allows requests with correct x-api-key and identity headers", async () => {
+  it("allows internal requests with correct x-api-key and no identity", async () => {
     const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID)
-      .set("x-user-id", USER_ID)
-      .set("x-run-id", RUN_ID);
+      .get("/internal/outlets/dr-stale")
+      .set("x-api-key", API_KEY);
     expect(res.status).toBe(200);
   });
 });
 
-describe("Identity middleware", () => {
+describe("requireOrgId middleware (/orgs/*)", () => {
   beforeEach(() => {
     clearMocks();
   });
 
-  it("rejects requests missing x-org-id", async () => {
+  it("rejects /orgs requests missing x-org-id", async () => {
     const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-user-id", USER_ID)
-      .set("x-run-id", RUN_ID);
+      .get("/orgs/outlets/dr-status?outletIds=11111111-1111-1111-1111-111111111111")
+      .set("x-api-key", API_KEY);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-org-id/);
   });
 
-  it("rejects requests missing x-user-id", async () => {
+  it("accepts /orgs requests with only x-org-id (user/run optional)", async () => {
     const res = await request(app)
-      .get("/outlets/dr-stale")
+      .get("/orgs/outlets/dr-status?outletIds=11111111-1111-1111-1111-111111111111")
       .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID)
-      .set("x-run-id", RUN_ID);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/x-user-id/);
+      .set("x-org-id", ORG_ID);
+    expect(res.status).toBe(200);
   });
+});
 
-  it("rejects requests with invalid x-org-id", async () => {
-    const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-org-id", "not-a-uuid")
-      .set("x-user-id", USER_ID)
-      .set("x-run-id", RUN_ID);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/x-org-id/);
-  });
-
-  it("rejects requests with invalid x-user-id", async () => {
-    const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID)
-      .set("x-user-id", "not-a-uuid")
-      .set("x-run-id", RUN_ID);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/x-user-id/);
-  });
-
-  it("rejects requests missing x-run-id", async () => {
-    const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID)
-      .set("x-user-id", USER_ID);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/x-run-id/);
-  });
-
-  it("rejects requests with invalid x-run-id", async () => {
-    const res = await request(app)
-      .get("/outlets/dr-stale")
-      .set("x-api-key", API_KEY)
-      .set("x-org-id", ORG_ID)
-      .set("x-user-id", USER_ID)
-      .set("x-run-id", "not-a-uuid");
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/x-run-id/);
-  });
-
-  it("rejects requests missing all identity headers", async () => {
+describe("Route tiers", () => {
+  it("returns 404 for the old flat /outlets/* paths", async () => {
     const res = await request(app)
       .get("/outlets/dr-stale")
       .set("x-api-key", API_KEY);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 });

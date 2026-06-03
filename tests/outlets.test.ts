@@ -16,27 +16,31 @@ const RUN_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const OUTLET_ID_1 = "11111111-1111-1111-1111-111111111111";
 const OUTLET_ID_2 = "22222222-2222-2222-2222-222222222222";
 
-const withIdentity = (req: request.Test) =>
-  req.set("x-org-id", ORG_ID).set("x-user-id", USER_ID).set("x-run-id", RUN_ID);
+// /orgs/* requests carry x-org-id (required) + optional identity headers.
+const withOrg = (req: request.Test) =>
+  req
+    .set("x-api-key", API_KEY)
+    .set("x-org-id", ORG_ID)
+    .set("x-user-id", USER_ID)
+    .set("x-run-id", RUN_ID);
 
-describe("GET /outlets/dr-status", () => {
+// /internal/* requests carry the API key only.
+const internal = (req: request.Test) => req.set("x-api-key", API_KEY);
+
+describe("GET /orgs/outlets/dr-status", () => {
   beforeEach(() => {
     clearMocks();
   });
 
   it("returns 400 when outletIds is missing", async () => {
-    const res = await withIdentity(
-      request(app).get("/outlets/dr-status").set("x-api-key", API_KEY)
-    );
+    const res = await withOrg(request(app).get("/orgs/outlets/dr-status"));
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/outletIds/);
   });
 
   it("returns 400 for invalid UUID", async () => {
-    const res = await withIdentity(
-      request(app)
-        .get("/outlets/dr-status?outletIds=not-a-uuid")
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get("/orgs/outlets/dr-status?outletIds=not-a-uuid")
     );
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Invalid UUID/);
@@ -55,10 +59,8 @@ describe("GET /outlets/dr-status", () => {
       },
     ]);
 
-    const res = await withIdentity(
-      request(app)
-        .get(`/outlets/dr-status?outletIds=${OUTLET_ID_1}`)
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(`/orgs/outlets/dr-status?outletIds=${OUTLET_ID_1}`)
     );
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
@@ -70,10 +72,8 @@ describe("GET /outlets/dr-status", () => {
   it("returns default needs-update for unknown outlet IDs", async () => {
     setMockResult("v_outlets_domain_rating_to_update", []);
 
-    const res = await withIdentity(
-      request(app)
-        .get(`/outlets/dr-status?outletIds=${OUTLET_ID_1}`)
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(`/orgs/outlets/dr-status?outletIds=${OUTLET_ID_1}`)
     );
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
@@ -95,14 +95,13 @@ describe("GET /outlets/dr-status", () => {
       },
     ]);
 
-    const res = await withIdentity(
-      request(app)
-        .get(`/outlets/dr-status?outletIds=${OUTLET_ID_1},${OUTLET_ID_2}`)
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(
+        `/orgs/outlets/dr-status?outletIds=${OUTLET_ID_1},${OUTLET_ID_2}`
+      )
     );
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
-    // OUTLET_ID_1 found in DB, OUTLET_ID_2 defaults to needs_update
     const outlet2 = res.body.find(
       (r: { outletId: string }) => r.outletId === OUTLET_ID_2
     );
@@ -110,7 +109,7 @@ describe("GET /outlets/dr-status", () => {
   });
 });
 
-describe("GET /outlets/dr-stale", () => {
+describe("GET /internal/outlets/dr-stale", () => {
   beforeEach(() => {
     clearMocks();
   });
@@ -128,33 +127,28 @@ describe("GET /outlets/dr-stale", () => {
       },
     ]);
 
-    const res = await withIdentity(
-      request(app).get("/outlets/dr-stale").set("x-api-key", API_KEY)
-    );
+    const res = await internal(request(app).get("/internal/outlets/dr-stale"));
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].drToUpdate).toBe(true);
   });
 
   it("returns empty array when no stale outlets", async () => {
-    const res = await withIdentity(
-      request(app).get("/outlets/dr-stale").set("x-api-key", API_KEY)
-    );
+    const res = await internal(request(app).get("/internal/outlets/dr-stale"));
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
 });
 
-describe("PATCH /outlets/:outletId/domain-rating", () => {
+describe("PATCH /internal/outlets/:outletId/domain-rating", () => {
   beforeEach(() => {
     clearMocks();
   });
 
   it("returns 400 for invalid outlet ID", async () => {
-    const res = await withIdentity(
+    const res = await internal(
       request(app)
-        .patch("/outlets/not-uuid/domain-rating")
-        .set("x-api-key", API_KEY)
+        .patch("/internal/outlets/not-uuid/domain-rating")
         .send({
           dataType: "authority",
           dataCapturedAt: new Date().toISOString(),
@@ -166,21 +160,19 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
   });
 
   it("returns 400 for invalid body", async () => {
-    const res = await withIdentity(
+    const res = await internal(
       request(app)
-        .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
-        .set("x-api-key", API_KEY)
+        .patch(`/internal/outlets/${OUTLET_ID_1}/domain-rating`)
         .send({ dataType: "invalid" })
     );
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Invalid body/);
   });
 
-  it("creates apify_ahref and ahref_outlets records", async () => {
-    const res = await withIdentity(
+  it("creates apify_ahref and ahref_outlets records (no identity required)", async () => {
+    const res = await internal(
       request(app)
-        .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
-        .set("x-api-key", API_KEY)
+        .patch(`/internal/outlets/${OUTLET_ID_1}/domain-rating`)
         .send({
           dataType: "authority",
           dataCapturedAt: "2025-06-01T00:00:00Z",
@@ -192,7 +184,6 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
     expect(res.body.id).toBe("00000000-0000-0000-0000-000000000099");
     expect(res.body.outletId).toBe(OUTLET_ID_1);
 
-    // Verify transaction was used
     const client = getMockClient();
     const queryTexts = client.query.mock.calls.map((c: unknown[]) => c[0]);
     expect(queryTexts).toContain("BEGIN");
@@ -205,11 +196,10 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
     ).toBe(true);
   });
 
-  it("stores org_id and user_id from identity headers", async () => {
-    const res = await withIdentity(
+  it("inserts 25 columns (org_id/user_id no longer written)", async () => {
+    const res = await internal(
       request(app)
-        .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
-        .set("x-api-key", API_KEY)
+        .patch(`/internal/outlets/${OUTLET_ID_1}/domain-rating`)
         .send({
           dataType: "authority",
           dataCapturedAt: "2025-06-01T00:00:00Z",
@@ -226,16 +216,13 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
     );
     expect(insertCall).toBeDefined();
     const values = insertCall![1] as unknown[];
-    // org_id is $26, user_id is $27 (0-indexed: 25, 26)
-    expect(values[25]).toBe(ORG_ID);
-    expect(values[26]).toBe(USER_ID);
+    expect(values).toHaveLength(25);
   });
 
   it("stores traffic data type", async () => {
-    const res = await withIdentity(
+    const res = await internal(
       request(app)
-        .patch(`/outlets/${OUTLET_ID_1}/domain-rating`)
-        .set("x-api-key", API_KEY)
+        .patch(`/internal/outlets/${OUTLET_ID_1}/domain-rating`)
         .send({
           dataType: "traffic",
           dataCapturedAt: "2025-06-01T00:00:00Z",
@@ -247,7 +234,7 @@ describe("PATCH /outlets/:outletId/domain-rating", () => {
   });
 });
 
-describe("GET /outlets/low-domain-rating", () => {
+describe("GET /internal/outlets/low-domain-rating", () => {
   beforeEach(() => {
     clearMocks();
   });
@@ -266,8 +253,8 @@ describe("GET /outlets/low-domain-rating", () => {
       },
     ]);
 
-    const res = await withIdentity(
-      request(app).get("/outlets/low-domain-rating").set("x-api-key", API_KEY)
+    const res = await internal(
+      request(app).get("/internal/outlets/low-domain-rating")
     );
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
@@ -276,38 +263,35 @@ describe("GET /outlets/low-domain-rating", () => {
   });
 });
 
-describe("GET /outlets/campaign-categories-dr-status", () => {
+describe("GET /orgs/outlets/campaign-categories-dr-status", () => {
   beforeEach(() => {
     clearMocks();
   });
 
   it("returns 400 without campaignId", async () => {
-    const res = await withIdentity(
-      request(app)
-        .get("/outlets/campaign-categories-dr-status")
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get("/orgs/outlets/campaign-categories-dr-status")
     );
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/campaignId/);
   });
 
   it("returns 400 for invalid campaignId", async () => {
-    const res = await withIdentity(
-      request(app)
-        .get("/outlets/campaign-categories-dr-status?campaignId=not-uuid")
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(
+        "/orgs/outlets/campaign-categories-dr-status?campaignId=not-uuid"
+      )
     );
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Invalid campaignId/);
   });
 
-  it("calls outlets-service and returns DR status", async () => {
+  it("calls outlets-service /internal/outlets and forwards identity", async () => {
     const campaignId = "33333333-3333-3333-3333-333333333333";
 
-    // Mock the outlets-service fetch
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ outletIds: [OUTLET_ID_1] }),
+      json: async () => ({ outlets: [{ id: OUTLET_ID_1 }] }),
       text: async () => "",
     } as Response);
 
@@ -323,21 +307,24 @@ describe("GET /outlets/campaign-categories-dr-status", () => {
       },
     ]);
 
-    const res = await withIdentity(
-      request(app)
-        .get(
-          `/outlets/campaign-categories-dr-status?campaignId=${campaignId}`
-        )
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(
+        `/orgs/outlets/campaign-categories-dr-status?campaignId=${campaignId}`
+      )
     );
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].latestValidDr).toBe(55);
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      `http://localhost:9999/internal/outlets/by-campaign/${campaignId}`,
+      `http://localhost:9999/internal/outlets?campaignId=${campaignId}`,
       expect.objectContaining({
-        headers: expect.objectContaining({ "x-api-key": "test-outlets-key" }),
+        headers: expect.objectContaining({
+          "x-api-key": "test-outlets-key",
+          "x-org-id": ORG_ID,
+          "x-user-id": USER_ID,
+          "x-run-id": RUN_ID,
+        }),
       })
     );
 
@@ -349,16 +336,14 @@ describe("GET /outlets/campaign-categories-dr-status", () => {
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ outletIds: [] }),
+      json: async () => ({ outlets: [] }),
       text: async () => "",
     } as Response);
 
-    const res = await withIdentity(
-      request(app)
-        .get(
-          `/outlets/campaign-categories-dr-status?campaignId=${campaignId}`
-        )
-        .set("x-api-key", API_KEY)
+    const res = await withOrg(
+      request(app).get(
+        `/orgs/outlets/campaign-categories-dr-status?campaignId=${campaignId}`
+      )
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
