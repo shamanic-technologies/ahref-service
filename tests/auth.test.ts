@@ -6,11 +6,7 @@ import { clearMocks } from "./setup";
 const API_KEY = "test-api-key";
 const ORG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
-const app = createApp({
-  apiKey: API_KEY,
-  outletsServiceUrl: "http://localhost:9999",
-  outletsServiceApiKey: "test-outlets-key",
-});
+const app = createApp({ apiKey: API_KEY });
 
 describe("Auth middleware", () => {
   beforeEach(() => {
@@ -18,21 +14,21 @@ describe("Auth middleware", () => {
   });
 
   it("rejects requests without x-api-key", async () => {
-    const res = await request(app).get("/internal/outlets/dr-stale");
+    const res = await request(app).get("/internal/domains/dr-stale");
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/Unauthorized/);
   });
 
   it("rejects requests with wrong x-api-key", async () => {
     const res = await request(app)
-      .get("/internal/outlets/dr-stale")
+      .get("/internal/domains/dr-stale")
       .set("x-api-key", "wrong-key");
     expect(res.status).toBe(401);
   });
 
   it("allows internal requests with correct x-api-key and no identity", async () => {
     const res = await request(app)
-      .get("/internal/outlets/dr-stale")
+      .get("/internal/domains/dr-stale")
       .set("x-api-key", API_KEY);
     expect(res.status).toBe(200);
   });
@@ -45,7 +41,7 @@ describe("requireOrgId middleware (/orgs/*)", () => {
 
   it("rejects /orgs requests missing x-org-id", async () => {
     const res = await request(app)
-      .get("/orgs/outlets/dr-status?outletIds=11111111-1111-1111-1111-111111111111")
+      .get("/orgs/domains/dr-status?domains=example.com")
       .set("x-api-key", API_KEY);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-org-id/);
@@ -53,7 +49,7 @@ describe("requireOrgId middleware (/orgs/*)", () => {
 
   it("accepts /orgs requests with only x-org-id (user/run optional)", async () => {
     const res = await request(app)
-      .get("/orgs/outlets/dr-status?outletIds=11111111-1111-1111-1111-111111111111")
+      .get("/orgs/domains/dr-status?domains=example.com")
       .set("x-api-key", API_KEY)
       .set("x-org-id", ORG_ID);
     expect(res.status).toBe(200);

@@ -7,10 +7,12 @@ export const dataTypeSchema = z.enum(["authority", "traffic"]).openapi("AhrefDat
 
 export const updateDomainRatingBodySchema = z
   .object({
+    // Domain is the cache key — required. Normalized (www-stripped, lowercased)
+    // before storage by the ingestion route.
+    domain: z.string(),
     dataType: dataTypeSchema,
     dataCapturedAt: z.string().datetime(),
     urlInput: z.string().optional(),
-    domain: z.string().optional(),
     mode: z.string().optional(),
     rawData: z.record(z.unknown()),
     authorityDomainRating: z.number().int().nullable().optional(),
@@ -37,7 +39,7 @@ export const updateDomainRatingBodySchema = z
 
 export const drStatusResponseSchema = z
   .object({
-    outletId: z.string().uuid(),
+    domain: z.string(),
     drToUpdate: z.boolean(),
     drUpdateReason: z.string().nullable(),
     drLatestSearchDate: z.string().nullable(),
@@ -49,7 +51,7 @@ export const drStatusResponseSchema = z
 
 export const lowDrResponseSchema = z
   .object({
-    outletId: z.string().uuid(),
+    domain: z.string(),
     drToUpdate: z.boolean(),
     drUpdateReason: z.string().nullable(),
     drLatestSearchDate: z.string().nullable(),
