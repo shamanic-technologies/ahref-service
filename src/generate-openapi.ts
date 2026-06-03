@@ -7,6 +7,7 @@ import { writeFileSync } from "fs";
 import { join } from "path";
 import {
   updateDomainRatingBodySchema,
+  drComputeBodySchema,
   drStatusResponseSchema,
   lowDrResponseSchema,
 } from "./schemas/apify-ahref";
@@ -23,6 +24,7 @@ const orgHeaders = z.object({
 
 // Register schemas
 registry.register("UpdateDomainRatingBody", updateDomainRatingBodySchema);
+registry.register("DrComputeBody", drComputeBodySchema);
 registry.register("DrStatusResponse", drStatusResponseSchema);
 registry.register("LowDrResponse", lowDrResponseSchema);
 
@@ -64,6 +66,34 @@ registry.registerPath({
   responses: {
     200: {
       description: "DR status for requested domains",
+      content: {
+        "application/json": {
+          schema: z.array(drStatusResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
+// POST /orgs/domains/dr-compute
+registry.registerPath({
+  method: "post",
+  path: "/orgs/domains/dr-compute",
+  summary: "Scrape Ahrefs DR for domains on demand (declares cost + authorizes)",
+  request: {
+    headers: orgHeaders,
+    body: {
+      content: {
+        "application/json": {
+          schema: drComputeBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "DR status for the requested domains after the scrape",
       content: {
         "application/json": {
           schema: z.array(drStatusResponseSchema),
