@@ -46,20 +46,24 @@ registry.registerPath({
   },
 });
 
-// GET /orgs/outlets/dr-status
+// GET /orgs/domains/dr-status
 registry.registerPath({
   method: "get",
-  path: "/orgs/outlets/dr-status",
-  summary: "Get DR status for a list of outlet IDs",
+  path: "/orgs/domains/dr-status",
+  summary: "Get DR status for a list of domains",
   request: {
     headers: orgHeaders,
     query: z.object({
-      outletIds: z.string().describe("Comma-separated outlet UUIDs"),
+      domains: z
+        .string()
+        .describe(
+          "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
+        ),
     }),
   },
   responses: {
     200: {
-      description: "DR status for requested outlets",
+      description: "DR status for requested domains",
       content: {
         "application/json": {
           schema: z.array(drStatusResponseSchema),
@@ -70,21 +74,14 @@ registry.registerPath({
   security: [{ apiKey: [] }],
 });
 
-// GET /orgs/outlets/campaign-categories-dr-status
+// GET /internal/domains/dr-stale
 registry.registerPath({
   method: "get",
-  path: "/orgs/outlets/campaign-categories-dr-status",
-  summary:
-    "DR status for outlets in a campaign (cross-service with outlets-service)",
-  request: {
-    headers: orgHeaders,
-    query: z.object({
-      campaignId: z.string().uuid().describe("Campaign UUID"),
-    }),
-  },
+  path: "/internal/domains/dr-stale",
+  summary: "Known domains whose DR needs a refresh (platform/cron)",
   responses: {
     200: {
-      description: "DR status for campaign outlets",
+      description: "Stale DR domains",
       content: {
         "application/json": {
           schema: z.array(drStatusResponseSchema),
@@ -95,32 +92,14 @@ registry.registerPath({
   security: [{ apiKey: [] }],
 });
 
-// GET /internal/outlets/dr-stale
+// GET /internal/domains/low-domain-rating
 registry.registerPath({
   method: "get",
-  path: "/internal/outlets/dr-stale",
-  summary: "All outlets that need DR refresh (platform/cron)",
+  path: "/internal/domains/low-domain-rating",
+  summary: "Known domains with DR < 10 (platform/cron)",
   responses: {
     200: {
-      description: "Stale DR outlets",
-      content: {
-        "application/json": {
-          schema: z.array(drStatusResponseSchema),
-        },
-      },
-    },
-  },
-  security: [{ apiKey: [] }],
-});
-
-// GET /internal/outlets/low-domain-rating
-registry.registerPath({
-  method: "get",
-  path: "/internal/outlets/low-domain-rating",
-  summary: "Outlets with DR < 10 (platform/cron)",
-  responses: {
-    200: {
-      description: "Low DR outlets",
+      description: "Low DR domains",
       content: {
         "application/json": {
           schema: z.array(lowDrResponseSchema),
@@ -131,13 +110,12 @@ registry.registerPath({
   security: [{ apiKey: [] }],
 });
 
-// PATCH /internal/outlets/:outletId/domain-rating
+// POST /internal/domains/domain-rating
 registry.registerPath({
-  method: "patch",
-  path: "/internal/outlets/{outletId}/domain-rating",
-  summary: "Ingest scraped Ahrefs data for an outlet (platform worker)",
+  method: "post",
+  path: "/internal/domains/domain-rating",
+  summary: "Ingest scraped Ahrefs data for a domain (platform worker)",
   request: {
-    params: z.object({ outletId: z.string().uuid() }),
     body: {
       content: {
         "application/json": {
@@ -153,7 +131,7 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             id: z.string().uuid(),
-            outletId: z.string().uuid(),
+            domain: z.string(),
           }),
         },
       },
@@ -169,7 +147,7 @@ const doc = generator.generateDocument({
     title: "Ahref Service",
     version: "1.0.0",
     description:
-      "Manages Ahrefs domain authority and traffic data for press outlets",
+      "Domain-keyed cache of Ahrefs domain authority and traffic data. Keyed per domain (www folded to apex, other subdomains distinct); no outlet/campaign/brand coupling.",
   },
   servers: [{ url: "/" }],
   security: [],

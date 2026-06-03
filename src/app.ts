@@ -4,13 +4,11 @@ import { join } from "path";
 import { authMiddleware } from "./middleware/auth";
 import { requireOrgId } from "./middleware/org-context";
 import { healthRouter } from "./routes/health";
-import { createOrgsOutletsRouter } from "./routes/orgs-outlets";
-import { createInternalOutletsRouter } from "./routes/internal-outlets";
+import { createOrgsDomainsRouter } from "./routes/orgs-domains";
+import { createInternalDomainsRouter } from "./routes/internal-domains";
 
 export interface AppConfig {
   apiKey: string;
-  outletsServiceUrl: string;
-  outletsServiceApiKey: string;
 }
 
 export const createApp = (config: AppConfig) => {
@@ -35,17 +33,10 @@ export const createApp = (config: AppConfig) => {
   app.use(authMiddleware(config.apiKey));
 
   // Internal tier — API key only, no org context (platform / cron / ingestion)
-  app.use("/internal/outlets", createInternalOutletsRouter());
+  app.use("/internal/domains", createInternalDomainsRouter());
 
   // Org tier — API key + x-org-id required
-  app.use(
-    "/orgs/outlets",
-    requireOrgId,
-    createOrgsOutletsRouter({
-      baseUrl: config.outletsServiceUrl,
-      apiKey: config.outletsServiceApiKey,
-    })
-  );
+  app.use("/orgs/domains", requireOrgId, createOrgsDomainsRouter());
 
   return app;
 };

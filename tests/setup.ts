@@ -3,39 +3,25 @@ import { vi } from "vitest";
 // Mock pg Pool
 const mockResults: Map<string, { rows: Record<string, unknown>[] }> = new Map();
 let lastQuery: { text: string; values: unknown[] } | null = null;
-let transactionQueries: { text: string; values: unknown[] }[] = [];
 
-const mockClient = {
-  query: vi.fn(async (text: string, values?: unknown[]) => {
-    lastQuery = { text, values: values ?? [] };
-    transactionQueries.push({ text, values: values ?? [] });
-
-    if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
-      return { rows: [] };
-    }
-    if (text.includes("INSERT INTO apify_ahref")) {
-      return {
-        rows: [{ id: "00000000-0000-0000-0000-000000000099" }],
-      };
-    }
-    if (text.includes("INSERT INTO ahref_outlets")) {
-      return { rows: [] };
-    }
-    return { rows: [] };
-  }),
-  release: vi.fn(),
-};
+const INSERT_APIFY_ID = "00000000-0000-0000-0000-000000000099";
 
 const mockPool = {
   query: vi.fn(async (text: string, values?: unknown[]) => {
     lastQuery = { text, values: values ?? [] };
+
+    // Ingestion: single INSERT into the data/cache table returns the new id.
+    if (text.includes("INSERT INTO apify_ahref")) {
+      return { rows: [{ id: INSERT_APIFY_ID }] };
+    }
+
     const key = findMatchingKey(text);
     if (key && mockResults.has(key)) {
       return mockResults.get(key)!;
     }
     return { rows: [] };
   }),
-  connect: vi.fn(async () => mockClient),
+  connect: vi.fn(),
   end: vi.fn(),
 };
 
@@ -56,16 +42,12 @@ export const setMockResult = (
 export const clearMocks = () => {
   mockResults.clear();
   lastQuery = null;
-  transactionQueries = [];
   mockPool.query.mockClear();
-  mockClient.query.mockClear();
-  mockClient.release.mockClear();
 };
 
 export const getLastQuery = () => lastQuery;
-export const getTransactionQueries = () => transactionQueries;
 export const getMockPool = () => mockPool;
-export const getMockClient = () => mockClient;
+export const getInsertApifyId = () => INSERT_APIFY_ID;
 
 // Mock the db module
 vi.mock("../src/db", () => ({

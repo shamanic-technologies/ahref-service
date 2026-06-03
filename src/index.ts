@@ -11,8 +11,6 @@ const start = async () => {
 
   const app = createApp({
     apiKey: config.AHREF_SERVICE_API_KEY,
-    outletsServiceUrl: config.OUTLETS_SERVICE_URL,
-    outletsServiceApiKey: config.OUTLETS_SERVICE_API_KEY,
   });
 
   app.listen(config.PORT, () => {
