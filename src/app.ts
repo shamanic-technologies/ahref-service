@@ -2,9 +2,10 @@ import express from "express";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { authMiddleware } from "./middleware/auth";
-import { requireIdentity } from "./middleware/identity";
+import { requireOrgId } from "./middleware/org-context";
 import { healthRouter } from "./routes/health";
-import { createOutletsRouter } from "./routes/outlets";
+import { createOrgsOutletsRouter } from "./routes/orgs-outlets";
+import { createInternalOutletsRouter } from "./routes/internal-outlets";
 
 export interface AppConfig {
   apiKey: string;
@@ -17,10 +18,9 @@ export const createApp = (config: AppConfig) => {
 
   app.use(express.json());
 
-  // Health check — no auth
+  // Public routes — no auth
   app.use(healthRouter);
 
-  // OpenAPI spec — no auth
   app.get("/openapi.json", (_req, res) => {
     const specPath = join(__dirname, "..", "openapi.json");
     if (!existsSync(specPath)) {
@@ -31,11 +31,17 @@ export const createApp = (config: AppConfig) => {
     res.json(spec);
   });
 
-  // Auth-protected routes — require identity headers
+  // All remaining routes require the service API key
+  app.use(authMiddleware(config.apiKey));
+
+  // Internal tier — API key only, no org context (platform / cron / ingestion)
+  app.use("/internal/outlets", createInternalOutletsRouter());
+
+  // Org tier — API key + x-org-id required
   app.use(
-    authMiddleware(config.apiKey),
-    requireIdentity,
-    createOutletsRouter({
+    "/orgs/outlets",
+    requireOrgId,
+    createOrgsOutletsRouter({
       baseUrl: config.outletsServiceUrl,
       apiKey: config.outletsServiceApiKey,
     })
