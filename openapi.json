@@ -3,7 +3,7 @@
   "info": {
     "title": "Ahref Service",
     "version": "1.0.0",
-    "description": "Manages Ahrefs domain authority and traffic data for press outlets"
+    "description": "Domain-keyed cache of Ahrefs domain authority and traffic data. Keyed per domain (www folded to apex, other subdomains distinct); no outlet/campaign/brand coupling."
   },
   "servers": [
     {
@@ -23,6 +23,9 @@
       "UpdateDomainRatingBody": {
         "type": "object",
         "properties": {
+          "domain": {
+            "type": "string"
+          },
           "dataType": {
             "$ref": "#/components/schemas/AhrefDataType"
           },
@@ -31,9 +34,6 @@
             "format": "date-time"
           },
           "urlInput": {
-            "type": "string"
-          },
-          "domain": {
             "type": "string"
           },
           "mode": {
@@ -114,6 +114,7 @@
           }
         },
         "required": [
+          "domain",
           "dataType",
           "dataCapturedAt",
           "rawData"
@@ -122,9 +123,8 @@
       "DrStatusResponse": {
         "type": "object",
         "properties": {
-          "outletId": {
-            "type": "string",
-            "format": "uuid"
+          "domain": {
+            "type": "string"
           },
           "drToUpdate": {
             "type": "boolean"
@@ -150,7 +150,7 @@
           }
         },
         "required": [
-          "outletId",
+          "domain",
           "drToUpdate",
           "drUpdateReason",
           "drLatestSearchDate",
@@ -162,9 +162,8 @@
       "LowDrResponse": {
         "type": "object",
         "properties": {
-          "outletId": {
-            "type": "string",
-            "format": "uuid"
+          "domain": {
+            "type": "string"
           },
           "drToUpdate": {
             "type": "boolean"
@@ -194,7 +193,7 @@
           }
         },
         "required": [
-          "outletId",
+          "domain",
           "drToUpdate",
           "drUpdateReason",
           "drLatestSearchDate",
@@ -250,9 +249,9 @@
         }
       }
     },
-    "/orgs/outlets/dr-status": {
+    "/orgs/domains/dr-status": {
       "get": {
-        "summary": "Get DR status for a list of outlet IDs",
+        "summary": "Get DR status for a list of domains",
         "security": [
           {
             "apiKey": []
@@ -262,11 +261,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated outlet UUIDs"
+              "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
             },
             "required": true,
-            "description": "Comma-separated outlet UUIDs",
-            "name": "outletIds",
+            "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct.",
+            "name": "domains",
             "in": "query"
           },
           {
@@ -305,7 +304,7 @@
         ],
         "responses": {
           "200": {
-            "description": "DR status for requested outlets",
+            "description": "DR status for requested domains",
             "content": {
               "application/json": {
                 "schema": {
@@ -320,63 +319,17 @@
         }
       }
     },
-    "/orgs/outlets/campaign-categories-dr-status": {
+    "/internal/domains/dr-stale": {
       "get": {
-        "summary": "DR status for outlets in a campaign (cross-service with outlets-service)",
+        "summary": "Known domains whose DR needs a refresh (platform/cron)",
         "security": [
           {
             "apiKey": []
           }
         ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Campaign UUID"
-            },
-            "required": true,
-            "description": "Campaign UUID",
-            "name": "campaignId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Org UUID from client-service (required)"
-            },
-            "required": true,
-            "description": "Org UUID from client-service (required)",
-            "name": "x-org-id",
-            "in": "header"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "User UUID from client-service"
-            },
-            "required": false,
-            "description": "User UUID from client-service",
-            "name": "x-user-id",
-            "in": "header"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Caller's run ID from runs-service"
-            },
-            "required": false,
-            "description": "Caller's run ID from runs-service",
-            "name": "x-run-id",
-            "in": "header"
-          }
-        ],
         "responses": {
           "200": {
-            "description": "DR status for campaign outlets",
+            "description": "Stale DR domains",
             "content": {
               "application/json": {
                 "schema": {
@@ -391,9 +344,9 @@
         }
       }
     },
-    "/internal/outlets/dr-stale": {
+    "/internal/domains/low-domain-rating": {
       "get": {
-        "summary": "All outlets that need DR refresh (platform/cron)",
+        "summary": "Known domains with DR < 10 (platform/cron)",
         "security": [
           {
             "apiKey": []
@@ -401,32 +354,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Stale DR outlets",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DrStatusResponse"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/internal/outlets/low-domain-rating": {
-      "get": {
-        "summary": "Outlets with DR < 10 (platform/cron)",
-        "security": [
-          {
-            "apiKey": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Low DR outlets",
+            "description": "Low DR domains",
             "content": {
               "application/json": {
                 "schema": {
@@ -441,23 +369,12 @@
         }
       }
     },
-    "/internal/outlets/{outletId}/domain-rating": {
-      "patch": {
-        "summary": "Ingest scraped Ahrefs data for an outlet (platform worker)",
+    "/internal/domains/domain-rating": {
+      "post": {
+        "summary": "Ingest scraped Ahrefs data for a domain (platform worker)",
         "security": [
           {
             "apiKey": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "outletId",
-            "in": "path"
           }
         ],
         "requestBody": {
@@ -481,14 +398,13 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "outletId": {
-                      "type": "string",
-                      "format": "uuid"
+                    "domain": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "id",
-                    "outletId"
+                    "domain"
                   ]
                 }
               }
