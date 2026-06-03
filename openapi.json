@@ -120,6 +120,23 @@
           "rawData"
         ]
       },
+      "DrComputeBody": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "Domains to fetch DR for. Normalized server-side (www stripped, case-folded); other subdomains kept distinct."
+          }
+        },
+        "required": [
+          "domains"
+        ]
+      },
       "DrStatusResponse": {
         "type": "object",
         "properties": {
@@ -305,6 +322,75 @@
         "responses": {
           "200": {
             "description": "DR status for requested domains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/domains/dr-compute": {
+      "post": {
+        "summary": "Scrape Ahrefs DR for domains on demand (declares cost + authorizes)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Org UUID from client-service (required)"
+            },
+            "required": true,
+            "description": "Org UUID from client-service (required)",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User UUID from client-service"
+            },
+            "required": false,
+            "description": "User UUID from client-service",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service"
+            },
+            "required": false,
+            "description": "Caller's run ID from runs-service",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrComputeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "DR status for the requested domains after the scrape",
             "content": {
               "application/json": {
                 "schema": {
