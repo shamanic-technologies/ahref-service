@@ -96,6 +96,48 @@ export const drStatusResponseSchema = z
   })
   .openapi("DrStatusResponse");
 
+// Body for POST /orgs/domains/ai-visibility — single domain, get-or-refresh.
+export const aiVisibilityBodySchema = z
+  .object({
+    domain: z
+      .string()
+      .min(1)
+      .describe(
+        "Brand domain to fetch Ahrefs Brand-Radar AI-visibility stats for. Normalized server-side (www stripped, case-folded)."
+      ),
+  })
+  .openapi("AiVisibilityBody");
+
+export const aiVisibilityResponseSchema = z
+  .object({
+    domain: z.string(),
+    snapshotDate: z
+      .string()
+      .nullable()
+      .describe("Date the AI-visibility data reflects (extraction date)."),
+    fetchedFromCache: z.boolean(),
+    mentionsTotal: z
+      .number()
+      .int()
+      .describe("Global brand mentions across all AI engines."),
+    mentionsByEngine: z.array(
+      z.object({
+        engine: z.string().describe("Lower-snake-case stable engine key."),
+        mentions: z.number().int(),
+      })
+    ),
+    topCompetitors: z.array(
+      z.object({
+        brandId: z.string().describe("Global brand-service brand id."),
+        brand: z.string().nullable(),
+        domain: z.string().nullable(),
+        citations: z.number().int(),
+      })
+    ),
+    raw: z.record(z.unknown()).describe("Full upstream Brand-Radar payload."),
+  })
+  .openapi("AiVisibilityResponse");
+
 export const lowDrResponseSchema = z
   .object({
     domain: z.string(),

@@ -12,6 +12,8 @@ import {
   lowDrResponseSchema,
   trafficComputeBodySchema,
   trafficResponseSchema,
+  aiVisibilityBodySchema,
+  aiVisibilityResponseSchema,
 } from "./schemas/apify-ahref";
 
 const registry = new OpenAPIRegistry();
@@ -31,6 +33,8 @@ registry.register("DrStatusResponse", drStatusResponseSchema);
 registry.register("LowDrResponse", lowDrResponseSchema);
 registry.register("TrafficComputeBody", trafficComputeBodySchema);
 registry.register("TrafficResponse", trafficResponseSchema);
+registry.register("AiVisibilityBody", aiVisibilityBodySchema);
+registry.register("AiVisibilityResponse", aiVisibilityResponseSchema);
 
 // Health
 registry.registerPath({
@@ -157,6 +161,36 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.array(trafficResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
+// POST /orgs/domains/ai-visibility
+registry.registerPath({
+  method: "post",
+  path: "/orgs/domains/ai-visibility",
+  summary:
+    "Get-or-refresh Ahrefs Brand-Radar AI-visibility stats for a domain (declares cost + authorizes on scrape)",
+  request: {
+    headers: orgHeaders,
+    body: {
+      content: {
+        "application/json": {
+          schema: aiVisibilityBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "AI-visibility stats: global mention count, per-engine breakdown, top cited competitors, and raw upstream payload",
+      content: {
+        "application/json": {
+          schema: aiVisibilityResponseSchema,
         },
       },
     },

@@ -3,7 +3,12 @@ import { getPool } from "../db";
 import { getDrStatus, getTrafficHistory } from "../services/ahref";
 import { computeDr } from "../services/dr-compute";
 import { computeTraffic } from "../services/traffic-compute";
-import { drComputeBodySchema, trafficComputeBodySchema } from "../schemas/apify-ahref";
+import { getOrComputeAiVisibility } from "../services/ai-visibility";
+import {
+  drComputeBodySchema,
+  trafficComputeBodySchema,
+  aiVisibilityBodySchema,
+} from "../schemas/apify-ahref";
 import { normalizeDomain } from "../lib/domain";
 
 /**
@@ -137,6 +142,37 @@ export const createOrgsDomainsRouter = () => {
       }
       console.error("[ahref-service] Error computing traffic:", error);
       res.status(502).json({ error: "Failed to compute traffic", detail: message });
+    }
+  });
+
+  // POST /orgs/domains/ai-visibility — get-or-refresh Ahrefs Brand-Radar
+  // AI-visibility stats for a domain: return the cached snapshot if fresh, else
+  // scrape via Apify (declares cost + authorizes) and resolve competitor brands.
+  router.post("/ai-visibility", async (req: Request, res: Response) => {
+    const parsed = aiVisibilityBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const result = await getOrComputeAiVisibility(
+        getPool(),
+        parsed.data.domain,
+        req.orgContext!
+      );
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // An unusable domain is a client error (400); everything else is a
+      // downstream / cost / scrape / brand-resolve failure → fail loud as 502
+      // (distinguishable from a true zero-mention result, which is a 200).
+      if (message.includes("normalizeDomain")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      console.error("[ahref-service] Error computing AI-visibility:", error);
+      res.status(502).json({ error: "Failed to compute AI-visibility", detail: message });
     }
   });
 

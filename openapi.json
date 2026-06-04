@@ -299,6 +299,103 @@
           "trafficValueMonthlyAvg",
           "monthlyOrganicTraffic"
         ]
+      },
+      "AiVisibilityBody": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Brand domain to fetch Ahrefs Brand-Radar AI-visibility stats for. Normalized server-side (www stripped, case-folded)."
+          }
+        },
+        "required": [
+          "domain"
+        ]
+      },
+      "AiVisibilityResponse": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "snapshotDate": {
+            "type": "string",
+            "nullable": true,
+            "description": "Date the AI-visibility data reflects (extraction date)."
+          },
+          "fetchedFromCache": {
+            "type": "boolean"
+          },
+          "mentionsTotal": {
+            "type": "integer",
+            "description": "Global brand mentions across all AI engines."
+          },
+          "mentionsByEngine": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "engine": {
+                  "type": "string",
+                  "description": "Lower-snake-case stable engine key."
+                },
+                "mentions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "engine",
+                "mentions"
+              ]
+            }
+          },
+          "topCompetitors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "brandId": {
+                  "type": "string",
+                  "description": "Global brand-service brand id."
+                },
+                "brand": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "domain": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "citations": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "brandId",
+                "brand",
+                "domain",
+                "citations"
+              ]
+            }
+          },
+          "raw": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Full upstream Brand-Radar payload."
+          }
+        },
+        "required": [
+          "domain",
+          "snapshotDate",
+          "fetchedFromCache",
+          "mentionsTotal",
+          "mentionsByEngine",
+          "topCompetitors",
+          "raw"
+        ]
       }
     },
     "parameters": {},
@@ -617,6 +714,72 @@
                   "items": {
                     "$ref": "#/components/schemas/TrafficResponse"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/domains/ai-visibility": {
+      "post": {
+        "summary": "Get-or-refresh Ahrefs Brand-Radar AI-visibility stats for a domain (declares cost + authorizes on scrape)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Org UUID from client-service (required)"
+            },
+            "required": true,
+            "description": "Org UUID from client-service (required)",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User UUID from client-service"
+            },
+            "required": false,
+            "description": "User UUID from client-service",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service"
+            },
+            "required": false,
+            "description": "Caller's run ID from runs-service",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiVisibilityBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI-visibility stats: global mention count, per-engine breakdown, top cited competitors, and raw upstream payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiVisibilityResponse"
                 }
               }
             }

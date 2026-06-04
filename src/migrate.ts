@@ -185,9 +185,47 @@ FROM domain_traffic_snapshot
 ORDER BY domain, data_captured_at DESC;
 `;
 
+/**
+ * AI-visibility (Ahrefs Brand-Radar) extends the SAME domain-keyed cache table
+ * with a new `data_type` and three normalized columns. raw_data already
+ * preserves the full upstream payload (bronze). The competitors column stores
+ * the fully-resolved list (brandId resolved at ingest — brandId is GLOBAL in
+ * brand-service, so it is valid for every org reading the cache).
+ *
+ * `ALTER TYPE ... ADD VALUE` runs as its own statement, separate from the
+ * statements that USE the new value (the partial index + view), because a new
+ * enum value added via ALTER TYPE cannot be used in the same transaction.
+ */
+const AI_VISIBILITY_MIGRATION_SQL = `
+ALTER TABLE apify_ahref ADD COLUMN IF NOT EXISTS ai_mentions_total INTEGER;
+ALTER TABLE apify_ahref ADD COLUMN IF NOT EXISTS ai_mentions_by_engine JSONB;
+ALTER TABLE apify_ahref ADD COLUMN IF NOT EXISTS ai_top_competitors JSONB;
+
+CREATE INDEX IF NOT EXISTS idx_apify_ahref_domain_ai_visibility
+  ON apify_ahref(domain, data_captured_at DESC)
+  WHERE data_type = 'ai_visibility';
+
+-- View: latest AI-visibility row per domain (the cache read path).
+CREATE OR REPLACE VIEW v_domains_ai_visibility_latest AS
+SELECT DISTINCT ON (domain)
+  domain,
+  data_captured_at,
+  ai_mentions_total,
+  ai_mentions_by_engine,
+  ai_top_competitors,
+  raw_data
+FROM apify_ahref
+WHERE data_type = 'ai_visibility'
+ORDER BY domain, data_captured_at DESC;
+`;
+
 export const runMigrations = async (pool: Pool): Promise<void> => {
   console.log("[ahref-service] Running migrations...");
   await pool.query(MIGRATION_SQL);
+  await pool.query(
+    `ALTER TYPE ahref_data_type ADD VALUE IF NOT EXISTS 'ai_visibility';`
+  );
+  await pool.query(AI_VISIBILITY_MIGRATION_SQL);
   console.log("[ahref-service] Migrations complete.");
 };
 

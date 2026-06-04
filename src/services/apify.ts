@@ -79,6 +79,12 @@ interface ApifyRunOutcome {
   chargedResults: number;
 }
 
+/** Coerce to a non-negative integer (mention/citation counts). Default 0. */
+const toNonNegInt = (v: unknown): number => {
+  const n = toNullableInt(v);
+  return n !== null && n >= 0 ? n : 0;
+};
+
 /**
  * Run the Ahrefs actor with the given input body and block until it finishes
  * (synchronous compute). Throws on any non-success run status — fail-loud, no
@@ -204,4 +210,101 @@ export const runTrafficScrape = async (
   }));
 
   return { results, chargedResults };
+};
+
+export interface ApifyAiVisibilityResult {
+  /** Brand identifier echoed by the actor (the domain we queried). */
+  brand: string;
+  /** Global brand mentions across all AI engines. */
+  mentionsTotal: number;
+  /** Per-AI-engine breakdown, engine = raw upstream model name. */
+  citationsByModel: Array<{ model: string; count: number }>;
+  /** Top cited domains (competitors), global, by citation count. */
+  topCitedDomains: Array<{ domain: string; citations: number }>;
+  /** Full upstream item — preserves every field for the response `raw`. */
+  raw: Record<string, unknown>;
+}
+
+export interface ApifyAiVisibilityRun {
+  result: ApifyAiVisibilityResult;
+  /** Number of billable result events Apify charged (for cost actualization). */
+  chargedResults: number;
+}
+
+/**
+ * Scrape Ahrefs Brand-Radar AI-visibility for a single domain via the SAME
+ * actor as DR (different `searchType`). Blocks until the run finishes. The
+ * brand identifier is passed as `keyword` (per the actor's input contract for
+ * `ai_visibility`); `urls` is sent too so the actor resolves the brand either
+ * way. Throws on a non-success run OR a missing ai_visibility item — fail-loud,
+ * so an upstream failure is a 502, never a false zero-mention result.
+ */
+export const runAiVisibilityScrape = async (
+  token: string,
+  domain: string
+): Promise<ApifyAiVisibilityRun> => {
+  const startResp = (await apifyFetch(
+    `${APIFY_BASE_URL}/v2/acts/${ACTOR_ID}/runs?waitForFinish=${START_WAIT_SECS}`,
+    token,
+    {
+      method: "POST",
+      body: { searchType: "ai_visibility", keyword: domain, urls: [domain] },
+    }
+  )) as { data: ApifyRunData };
+
+  let run = startResp.data;
+  const deadline = Date.now() + MAX_WAIT_MS;
+  while (!TERMINAL.has(run.status)) {
+    if (Date.now() > deadline) {
+      throw new Error(`[ahref-service] Apify run ${run.id} did not finish within ${MAX_WAIT_MS}ms`);
+    }
+    await sleep(POLL_INTERVAL_MS);
+    const polled = (await apifyFetch(
+      `${APIFY_BASE_URL}/v2/acts/${ACTOR_ID}/runs/${run.id}`,
+      token
+    )) as { data: ApifyRunData };
+    run = polled.data;
+  }
+
+  if (run.status !== "SUCCEEDED") {
+    throw new Error(`[ahref-service] Apify run ${run.id} ended with status ${run.status}`);
+  }
+
+  const items = (await apifyFetch(
+    `${APIFY_BASE_URL}/v2/datasets/${run.defaultDatasetId}/items?clean=true`,
+    token
+  )) as Array<Record<string, unknown>>;
+
+  const item = items.find((it) => it.searchType === "ai_visibility") ?? items[0];
+  if (!item) {
+    throw new Error(
+      `[ahref-service] Apify ai_visibility run ${run.id} returned no items for ${domain}`
+    );
+  }
+
+  const citationsByModel = Array.isArray(item.citationsByModel)
+    ? (item.citationsByModel as Array<Record<string, unknown>>).map((m) => ({
+        model: String(m.model ?? ""),
+        count: toNonNegInt(m.count),
+      }))
+    : [];
+
+  const topCitedDomains = Array.isArray(item.topCitedDomains)
+    ? (item.topCitedDomains as Array<Record<string, unknown>>).map((d) => ({
+        domain: String(d.domain ?? ""),
+        citations: toNonNegInt(d.mentions),
+      }))
+    : [];
+
+  const result: ApifyAiVisibilityResult = {
+    brand: String(item.brand ?? domain),
+    mentionsTotal: toNonNegInt(item.totalAiCitations),
+    citationsByModel,
+    topCitedDomains,
+    raw: item,
+  };
+
+  const chargedResults = run.chargedEventCounts?.[RESULT_EVENT] ?? 1;
+
+  return { result, chargedResults };
 };
