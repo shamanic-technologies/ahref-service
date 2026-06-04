@@ -125,6 +125,64 @@ SELECT *,
   END AS has_low_domain_rating
 FROM v_domains_domain_rating_to_update
 ORDER BY dr_latest_search_date DESC NULLS LAST;
+
+-- ============================================================================
+-- SILVER + GOLD: monthly traffic. Fed by bronze rows with data_type='traffic'.
+-- Additive only — never drops/mutates apify_ahref or the DR views above.
+-- ============================================================================
+
+-- Silver: canonical month-by-month organic traffic, one row per (domain, month).
+-- Derived deterministically by exploding bronze.traffic_history (no LLM). Ahrefs
+-- returns ~12-24 months of organic history per scrape, so a single scrape
+-- backfills the whole series; monthly re-scrapes extend/refresh it. Upsert is
+-- last-write-wins by the bronze data_captured_at (an older scrape never
+-- overwrites a month already written by a newer one).
+CREATE TABLE IF NOT EXISTS domain_traffic_monthly (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain TEXT NOT NULL,
+  month DATE NOT NULL,
+  organic_traffic BIGINT,
+  source_bronze_id UUID NOT NULL,
+  data_captured_at TIMESTAMPTZ NOT NULL,
+  last_rebuilt_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (domain, month)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_traffic_monthly_domain_month
+  ON domain_traffic_monthly(domain, month DESC);
+
+-- Silver: rich current snapshot, one row per scrape (append, deduped on the
+-- capture timestamp). Carries the fields Ahrefs only reports as "current":
+-- monthly traffic avg, traffic value ($), and the top pages / countries /
+-- keywords arrays. Ahrefs gives NO value time-series, so a value history is
+-- accrued here organically as monthly scrapes accumulate snapshot rows.
+CREATE TABLE IF NOT EXISTS domain_traffic_snapshot (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain TEXT NOT NULL,
+  data_captured_at TIMESTAMPTZ NOT NULL,
+  traffic_monthly_avg BIGINT,
+  traffic_value_monthly_avg BIGINT,
+  top_pages JSONB,
+  top_countries JSONB,
+  top_keywords JSONB,
+  source_bronze_id UUID NOT NULL,
+  last_rebuilt_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (domain, data_captured_at)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_traffic_snapshot_domain_captured
+  ON domain_traffic_snapshot(domain, data_captured_at DESC);
+
+-- Gold: latest traffic snapshot per domain (dashboard read path).
+CREATE OR REPLACE VIEW v_domain_traffic_latest AS
+SELECT DISTINCT ON (domain)
+  domain,
+  data_captured_at,
+  traffic_monthly_avg,
+  traffic_value_monthly_avg,
+  top_pages,
+  top_countries,
+  top_keywords
+FROM domain_traffic_snapshot
+ORDER BY domain, data_captured_at DESC;
 `;
 
 /**
