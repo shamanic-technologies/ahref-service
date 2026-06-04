@@ -49,3 +49,26 @@ export const getDownstreamConfig = (): DownstreamConfig => {
     keyServiceApiKey: env.KEY_SERVICE_API_KEY,
   };
 };
+
+/**
+ * Brand-service config — required only by the AI-visibility path (resolving
+ * competitor domains to global brand identities). Parsed lazily + separately
+ * from the DR-compute downstream config so dr-compute never needs these vars.
+ */
+const brandServiceSchema = z.object({
+  BRAND_SERVICE_URL: z.string().url(),
+  BRAND_SERVICE_API_KEY: z.string().min(1),
+});
+
+export interface BrandServiceConfig {
+  brandServiceUrl: string;
+  brandServiceApiKey: string;
+}
+
+export const getBrandServiceConfig = (): BrandServiceConfig => {
+  const env = brandServiceSchema.parse(process.env);
+  return {
+    brandServiceUrl: env.BRAND_SERVICE_URL,
+    brandServiceApiKey: env.BRAND_SERVICE_API_KEY,
+  };
+};
