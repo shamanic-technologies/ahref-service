@@ -73,19 +73,26 @@ const apifyFetch = async (
 const toNullableInt = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : null;
 
+interface ApifyRunOutcome {
+  items: Array<Record<string, unknown>>;
+  /** Number of billable result events Apify charged (for cost actualization). */
+  chargedResults: number;
+}
+
 /**
- * Scrape domain authority (DR) for the given normalized domains. Blocks until
- * the Apify run finishes (synchronous compute). Throws on any non-success run
- * status — fail-loud, no partial/silent success.
+ * Run the Ahrefs actor with the given input body and block until it finishes
+ * (synchronous compute). Throws on any non-success run status — fail-loud, no
+ * partial/silent success. Shared by every searchType (DR, traffic, ...); only
+ * the input body and the per-result mapping differ.
  */
-export const runDrScrape = async (token: string, domains: string[]): Promise<ApifyDrRun> => {
+const runActorScrape = async (
+  token: string,
+  body: Record<string, unknown>
+): Promise<ApifyRunOutcome> => {
   const startResp = (await apifyFetch(
     `${APIFY_BASE_URL}/v2/acts/${ACTOR_ID}/runs?waitForFinish=${START_WAIT_SECS}`,
     token,
-    {
-      method: "POST",
-      body: { searchType: "website_authority", urls: domains, mode: "domain" },
-    }
+    { method: "POST", body }
   )) as { data: ApifyRunData };
 
   let run = startResp.data;
@@ -111,6 +118,21 @@ export const runDrScrape = async (token: string, domains: string[]): Promise<Api
     token
   )) as Array<Record<string, unknown>>;
 
+  const chargedResults = run.chargedEventCounts?.[RESULT_EVENT] ?? items.length;
+
+  return { items, chargedResults };
+};
+
+/**
+ * Scrape domain authority (DR) for the given normalized domains.
+ */
+export const runDrScrape = async (token: string, domains: string[]): Promise<ApifyDrRun> => {
+  const { items, chargedResults } = await runActorScrape(token, {
+    searchType: "website_authority",
+    urls: domains,
+    mode: "domain",
+  });
+
   const results: ApifyDrResult[] = items.map((it) => ({
     domain: String(it.domain ?? ""),
     mode: typeof it.mode === "string" ? it.mode : undefined,
@@ -122,7 +144,64 @@ export const runDrScrape = async (token: string, domains: string[]): Promise<Api
     raw: it,
   }));
 
-  const chargedResults = run.chargedEventCounts?.[RESULT_EVENT] ?? results.length;
+  return { results, chargedResults };
+};
+
+export interface ApifyTrafficHistoryPoint {
+  date: string;
+  organic: number | null;
+}
+
+export interface ApifyTrafficResult {
+  domain: string;
+  mode?: string;
+  /** Current monthly organic-traffic estimate. */
+  trafficMonthlyAvg: number | null;
+  /** Current monthly organic-traffic value ($, Ahrefs units). No history. */
+  costMonthlyAvg: number | null;
+  /** Month-by-month organic-traffic series ([{date, organic}]). */
+  trafficHistory: ApifyTrafficHistoryPoint[] | null;
+  topPages: unknown;
+  topCountries: unknown;
+  topKeywords: unknown;
+  raw: Record<string, unknown>;
+}
+
+export interface ApifyTrafficRun {
+  results: ApifyTrafficResult[];
+  chargedResults: number;
+}
+
+const toNullableBigint = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : null;
+
+/**
+ * Scrape the traffic overview (monthly organic traffic + value + history + top
+ * pages/keywords/countries) for the given normalized domains.
+ */
+export const runTrafficScrape = async (
+  token: string,
+  domains: string[]
+): Promise<ApifyTrafficRun> => {
+  const { items, chargedResults } = await runActorScrape(token, {
+    searchType: "traffic_overview",
+    urls: domains,
+    mode: "domain",
+  });
+
+  const results: ApifyTrafficResult[] = items.map((it) => ({
+    domain: String(it.domain ?? ""),
+    mode: typeof it.mode === "string" ? it.mode : undefined,
+    trafficMonthlyAvg: toNullableBigint(it.trafficMonthlyAvg),
+    costMonthlyAvg: toNullableBigint(it.costMonthlyAvg),
+    trafficHistory: Array.isArray(it.trafficHistory)
+      ? (it.trafficHistory as ApifyTrafficHistoryPoint[])
+      : null,
+    topPages: it.topPages ?? null,
+    topCountries: it.topCountries ?? null,
+    topKeywords: it.topKeywords ?? null,
+    raw: it,
+  }));
 
   return { results, chargedResults };
 };

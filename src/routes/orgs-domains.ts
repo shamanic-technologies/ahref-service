@@ -1,8 +1,9 @@
 import { Router, Request, Response } from "express";
 import { getPool } from "../db";
-import { getDrStatus } from "../services/ahref";
+import { getDrStatus, getTrafficHistory } from "../services/ahref";
 import { computeDr } from "../services/dr-compute";
-import { drComputeBodySchema } from "../schemas/apify-ahref";
+import { computeTraffic } from "../services/traffic-compute";
+import { drComputeBodySchema, trafficComputeBodySchema } from "../schemas/apify-ahref";
 import { normalizeDomain } from "../lib/domain";
 
 /**
@@ -74,6 +75,68 @@ export const createOrgsDomainsRouter = () => {
       }
       console.error("[ahref-service] Error computing DR:", error);
       res.status(502).json({ error: "Failed to compute DR", detail: message });
+    }
+  });
+
+  // GET /orgs/domains/traffic-history?domains=a.com,b.com,...
+  // Pure read of the traffic silver/gold: latest snapshot + monthly organic
+  // series per domain. No spend.
+  router.get("/traffic-history", async (req: Request, res: Response) => {
+    try {
+      const raw = req.query.domains;
+      if (!raw || typeof raw !== "string") {
+        res.status(400).json({ error: "domains query parameter is required" });
+        return;
+      }
+
+      const inputs = raw.split(",").map((d) => d.trim()).filter(Boolean);
+      if (inputs.length === 0) {
+        res.status(400).json({ error: "domains query parameter is required" });
+        return;
+      }
+
+      let domains: string[];
+      try {
+        // Normalize + dedupe so www/non-www and casing collapse to one key.
+        domains = [...new Set(inputs.map(normalizeDomain))];
+      } catch (err) {
+        res
+          .status(400)
+          .json({ error: err instanceof Error ? err.message : "Invalid domain" });
+        return;
+      }
+
+      const result = await getTrafficHistory(getPool(), domains);
+      res.json(result);
+    } catch (error) {
+      console.error("[ahref-service] Error fetching traffic history:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /orgs/domains/traffic-compute — on-demand: scrape Ahrefs traffic for
+  // the given domains via Apify, declare cost + authorize, persist (bronze +
+  // silver), return the monthly series. Metered/spending — mirrors dr-compute.
+  router.post("/traffic-compute", async (req: Request, res: Response) => {
+    const parsed = trafficComputeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const result = await computeTraffic(getPool(), parsed.data.domains, req.orgContext!);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // An unusable domain is a client error (400); everything else is a
+      // downstream / cost / scrape failure → fail loud as 502.
+      if (message.includes("normalizeDomain")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      console.error("[ahref-service] Error computing traffic:", error);
+      res.status(502).json({ error: "Failed to compute traffic", detail: message });
     }
   });
 

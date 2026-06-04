@@ -10,6 +10,8 @@ import {
   drComputeBodySchema,
   drStatusResponseSchema,
   lowDrResponseSchema,
+  trafficComputeBodySchema,
+  trafficResponseSchema,
 } from "./schemas/apify-ahref";
 
 const registry = new OpenAPIRegistry();
@@ -27,6 +29,8 @@ registry.register("UpdateDomainRatingBody", updateDomainRatingBodySchema);
 registry.register("DrComputeBody", drComputeBodySchema);
 registry.register("DrStatusResponse", drStatusResponseSchema);
 registry.register("LowDrResponse", lowDrResponseSchema);
+registry.register("TrafficComputeBody", trafficComputeBodySchema);
+registry.register("TrafficResponse", trafficResponseSchema);
 
 // Health
 registry.registerPath({
@@ -97,6 +101,62 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.array(drStatusResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
+// GET /orgs/domains/traffic-history
+registry.registerPath({
+  method: "get",
+  path: "/orgs/domains/traffic-history",
+  summary: "Get traffic (latest snapshot + monthly organic series) for domains",
+  request: {
+    headers: orgHeaders,
+    query: z.object({
+      domains: z
+        .string()
+        .describe(
+          "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
+        ),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Traffic history for the requested domains",
+      content: {
+        "application/json": {
+          schema: z.array(trafficResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
+// POST /orgs/domains/traffic-compute
+registry.registerPath({
+  method: "post",
+  path: "/orgs/domains/traffic-compute",
+  summary: "Scrape Ahrefs traffic for domains on demand (declares cost + authorizes)",
+  request: {
+    headers: orgHeaders,
+    body: {
+      content: {
+        "application/json": {
+          schema: trafficComputeBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Traffic history for the requested domains after the scrape",
+      content: {
+        "application/json": {
+          schema: z.array(trafficResponseSchema),
         },
       },
     },

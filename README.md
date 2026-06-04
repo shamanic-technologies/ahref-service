@@ -26,9 +26,11 @@ never a silent empty key.
 |--------|------|------|---------|
 | GET | `/orgs/domains/dr-status?domains=a.com,b.com` | org (`x-api-key` + `x-org-id`) | DR status for domains; unknown domain → "needs update". **Pure read — no spend.** |
 | POST | `/orgs/domains/dr-compute` | org (`x-api-key` + `x-org-id`) | On-demand: scrape Ahrefs DR for `{domains}` via Apify, persist, return DR. **Metered — declares cost + authorizes.** |
+| GET | `/orgs/domains/traffic-history?domains=a.com,b.com` | org (`x-api-key` + `x-org-id`) | Latest traffic snapshot + monthly organic series per domain; unknown → `hasData:false`. **Pure read — no spend.** |
+| POST | `/orgs/domains/traffic-compute` | org (`x-api-key` + `x-org-id`) | On-demand: scrape Ahrefs traffic for `{domains}` via Apify, persist (bronze + silver), return the series. **Metered — declares cost + authorizes.** |
 | GET | `/internal/domains/dr-stale` | internal (`x-api-key`) | Known domains whose DR is now stale |
 | GET | `/internal/domains/low-domain-rating` | internal (`x-api-key`) | Known domains with DR < 10 |
-| POST | `/internal/domains/domain-rating` | internal (`x-api-key`) | Ingest scraped Ahrefs data (domain in body) |
+| POST | `/internal/domains/domain-rating` | internal (`x-api-key`) | Ingest scraped Ahrefs data (domain in body). `dataType:"traffic"` rows are also promoted to silver. |
 
 ## DR compute (on-demand scrape)
 
@@ -49,6 +51,34 @@ The cost unit is uniform per Apify result regardless of search type, so traffic 
 AI-visibility can later be added under the same `apify-ahrefs-result` cost name.
 DR is global reference data, so the persisted rating row carries no `org_id` —
 org attribution lives on the run + cost.
+
+## Traffic compute (on-demand scrape)
+
+`POST /orgs/domains/traffic-compute` mirrors `dr-compute` for the actor's
+`searchType: traffic_overview` (monthly organic traffic + value + history + top
+pages/countries/keywords). Same metered order, same `apify-ahrefs-result` cost
+(the Apify result unit is uniform per search type), fail-loud at every step.
+
+The dashboard is expected to call this **once a month per brand** (the caller
+resolves brand → domain; this service stays domain-centric). One scrape returns
+~12–24 months of organic-traffic back-history, so history accrues immediately;
+monthly re-runs extend and refresh it.
+
+## Data layering
+
+| Layer | Object | Shape |
+|-------|--------|-------|
+| **Bronze** | `apify_ahref` | Append-only raw scrape rows (full `raw_data` jsonb + typed columns). One row per scrape. The cache is "latest row per domain". |
+| **Silver** | `domain_traffic_monthly` | One row per `(domain, month)`, organic traffic exploded from bronze `traffic_history`. Last-write-wins by `data_captured_at`. The historized series. |
+| **Silver** | `domain_traffic_snapshot` | One row per scrape: monthly traffic avg, **traffic value ($)**, top pages/countries/keywords. Ahrefs gives no value-history, so a value series accrues here over monthly scrapes. |
+| **Gold** | `v_domain_traffic_latest` | Latest snapshot per domain (dashboard read). |
+
+Silver promotion is deterministic (no LLM — structured JSON) and runs inside the
+bronze ingest for `dataType:"traffic"` rows, so any path that writes a traffic
+bronze row gets silver. Migrations are additive and never drop/truncate these.
+
+DR has **no** history from the actor (`domainRating` is a current scalar across
+all search types); only traffic is pre-historized by Ahrefs.
 
 ## Data
 

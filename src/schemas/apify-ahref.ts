@@ -49,6 +49,41 @@ export const drComputeBodySchema = z
   })
   .openapi("DrComputeBody");
 
+// Body for POST /orgs/domains/traffic-compute — domains to scrape traffic for.
+export const trafficComputeBodySchema = z
+  .object({
+    domains: z
+      .array(z.string().min(1))
+      .min(1)
+      .describe(
+        "Domains to fetch traffic for. Normalized server-side (www stripped, case-folded); other subdomains kept distinct."
+      ),
+  })
+  .openapi("TrafficComputeBody");
+
+// One month of the organic-traffic time-series (silver `domain_traffic_monthly`).
+export const trafficMonthlySchema = z
+  .object({
+    month: z.string().describe("First day of the month (YYYY-MM-DD)."),
+    organicTraffic: z.number().int().nullable(),
+  })
+  .openapi("TrafficMonthly");
+
+// Per-domain traffic response: latest rich snapshot + full monthly organic series.
+export const trafficResponseSchema = z
+  .object({
+    domain: z.string(),
+    hasData: z.boolean(),
+    latestDataCapturedAt: z.string().nullable(),
+    trafficMonthlyAvg: z.number().int().nullable(),
+    trafficValueMonthlyAvg: z.number().int().nullable(),
+    topPages: z.unknown().nullable(),
+    topCountries: z.unknown().nullable(),
+    topKeywords: z.unknown().nullable(),
+    monthlyOrganicTraffic: z.array(trafficMonthlySchema),
+  })
+  .openapi("TrafficResponse");
+
 export const drStatusResponseSchema = z
   .object({
     domain: z.string(),

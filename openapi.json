@@ -219,6 +219,86 @@
           "needsUpdate",
           "hasLowDomainRating"
         ]
+      },
+      "TrafficComputeBody": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "Domains to fetch traffic for. Normalized server-side (www stripped, case-folded); other subdomains kept distinct."
+          }
+        },
+        "required": [
+          "domains"
+        ]
+      },
+      "TrafficMonthly": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "description": "First day of the month (YYYY-MM-DD)."
+          },
+          "organicTraffic": {
+            "type": "integer",
+            "nullable": true
+          }
+        },
+        "required": [
+          "month",
+          "organicTraffic"
+        ]
+      },
+      "TrafficResponse": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "hasData": {
+            "type": "boolean"
+          },
+          "latestDataCapturedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "trafficMonthlyAvg": {
+            "type": "integer",
+            "nullable": true
+          },
+          "trafficValueMonthlyAvg": {
+            "type": "integer",
+            "nullable": true
+          },
+          "topPages": {
+            "nullable": true
+          },
+          "topCountries": {
+            "nullable": true
+          },
+          "topKeywords": {
+            "nullable": true
+          },
+          "monthlyOrganicTraffic": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrafficMonthly"
+            }
+          }
+        },
+        "required": [
+          "domain",
+          "hasData",
+          "latestDataCapturedAt",
+          "trafficMonthlyAvg",
+          "trafficValueMonthlyAvg",
+          "monthlyOrganicTraffic"
+        ]
       }
     },
     "parameters": {},
@@ -397,6 +477,145 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/domains/traffic-history": {
+      "get": {
+        "summary": "Get traffic (latest snapshot + monthly organic series) for domains",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
+            },
+            "required": true,
+            "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct.",
+            "name": "domains",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Org UUID from client-service (required)"
+            },
+            "required": true,
+            "description": "Org UUID from client-service (required)",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User UUID from client-service"
+            },
+            "required": false,
+            "description": "User UUID from client-service",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service"
+            },
+            "required": false,
+            "description": "Caller's run ID from runs-service",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Traffic history for the requested domains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrafficResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/domains/traffic-compute": {
+      "post": {
+        "summary": "Scrape Ahrefs traffic for domains on demand (declares cost + authorizes)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Org UUID from client-service (required)"
+            },
+            "required": true,
+            "description": "Org UUID from client-service (required)",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User UUID from client-service"
+            },
+            "required": false,
+            "description": "User UUID from client-service",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service"
+            },
+            "required": false,
+            "description": "Caller's run ID from runs-service",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrafficComputeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Traffic history for the requested domains after the scrape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrafficResponse"
                   }
                 }
               }
