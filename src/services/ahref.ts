@@ -130,7 +130,169 @@ export const updateDomainRating = async (
     ]
   );
 
-  return { id: insertResult.rows[0].id as string, domain };
+  const id = insertResult.rows[0].id as string;
+
+  // Promote a traffic bronze row into the silver layer (monthly organic series
+  // + rich current snapshot). Authority rows have no silver projection.
+  if (body.dataType === "traffic") {
+    await promoteTrafficSilver(pool, {
+      domain,
+      bronzeId: id,
+      dataCapturedAt: body.dataCapturedAt,
+      trafficMonthlyAvg: body.trafficMonthlyAvg ?? null,
+      costMonthlyAvg: body.costMonthlyAvg ?? null,
+      trafficHistory: body.trafficHistory,
+      topPages: body.trafficTopPages ?? null,
+      topCountries: body.trafficTopCountries ?? null,
+      topKeywords: body.trafficTopKeywords ?? null,
+    });
+  }
+
+  return { id, domain };
+};
+
+interface TrafficSilverInput {
+  domain: string;
+  bronzeId: string;
+  dataCapturedAt: string;
+  trafficMonthlyAvg: number | null;
+  costMonthlyAvg: number | null;
+  trafficHistory: unknown;
+  topPages: unknown;
+  topCountries: unknown;
+  topKeywords: unknown;
+}
+
+/**
+ * Deterministically project a traffic bronze row into the silver layer
+ * (no LLM — structured JSON). Two upserts, both idempotent:
+ *  - `domain_traffic_snapshot`: the rich current values for this scrape
+ *    (deduped on the capture timestamp).
+ *  - `domain_traffic_monthly`: one row per (domain, month) exploded from
+ *    `trafficHistory`, last-write-wins by the bronze `data_captured_at` so an
+ *    older scrape never clobbers a month a newer scrape already wrote.
+ */
+export const promoteTrafficSilver = async (
+  pool: Pool,
+  input: TrafficSilverInput
+): Promise<void> => {
+  await pool.query(
+    `INSERT INTO domain_traffic_snapshot (
+      domain, data_captured_at, traffic_monthly_avg, traffic_value_monthly_avg,
+      top_pages, top_countries, top_keywords, source_bronze_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    ON CONFLICT (domain, data_captured_at) DO UPDATE SET
+      traffic_monthly_avg = EXCLUDED.traffic_monthly_avg,
+      traffic_value_monthly_avg = EXCLUDED.traffic_value_monthly_avg,
+      top_pages = EXCLUDED.top_pages,
+      top_countries = EXCLUDED.top_countries,
+      top_keywords = EXCLUDED.top_keywords,
+      source_bronze_id = EXCLUDED.source_bronze_id,
+      last_rebuilt_at = CURRENT_TIMESTAMP`,
+    [
+      input.domain,
+      input.dataCapturedAt,
+      input.trafficMonthlyAvg,
+      input.costMonthlyAvg,
+      input.topPages != null ? JSON.stringify(input.topPages) : null,
+      input.topCountries != null ? JSON.stringify(input.topCountries) : null,
+      input.topKeywords != null ? JSON.stringify(input.topKeywords) : null,
+      input.bronzeId,
+    ]
+  );
+
+  const history = Array.isArray(input.trafficHistory)
+    ? (input.trafficHistory as Array<{ date?: unknown; organic?: unknown }>)
+    : [];
+
+  for (const point of history) {
+    if (typeof point?.date !== "string") continue;
+    const organic =
+      typeof point.organic === "number" && Number.isFinite(point.organic)
+        ? Math.trunc(point.organic)
+        : null;
+    await pool.query(
+      `INSERT INTO domain_traffic_monthly (
+        domain, month, organic_traffic, source_bronze_id, data_captured_at
+      ) VALUES ($1, date_trunc('month', $2::date), $3, $4, $5)
+      ON CONFLICT (domain, month) DO UPDATE SET
+        organic_traffic = EXCLUDED.organic_traffic,
+        source_bronze_id = EXCLUDED.source_bronze_id,
+        data_captured_at = EXCLUDED.data_captured_at,
+        last_rebuilt_at = CURRENT_TIMESTAMP
+      WHERE EXCLUDED.data_captured_at >= domain_traffic_monthly.data_captured_at`,
+      [input.domain, point.date, organic, input.bronzeId, input.dataCapturedAt]
+    );
+  }
+};
+
+const toIsoOrNull = (v: unknown): string | null => {
+  if (v == null) return null;
+  return v instanceof Date ? v.toISOString() : String(v);
+};
+
+const toMonthString = (v: unknown): string =>
+  v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+
+/**
+ * Read the traffic silver/gold for a set of domains. Domains MUST already be
+ * normalized by the caller. Returns the latest rich snapshot plus the full
+ * ascending monthly organic series per domain; a never-scraped domain comes
+ * back with `hasData:false` and an empty series (pure read — no spend).
+ */
+export const getTrafficHistory = async (pool: Pool, domains: string[]) => {
+  if (domains.length === 0) return [];
+
+  const placeholders = domains.map((_, i) => `$${i + 1}`).join(",");
+
+  const latest = await pool.query(
+    `SELECT domain, data_captured_at, traffic_monthly_avg, traffic_value_monthly_avg,
+            top_pages, top_countries, top_keywords
+     FROM v_domain_traffic_latest
+     WHERE domain = ANY(ARRAY[${placeholders}]::text[])`,
+    domains
+  );
+
+  const monthly = await pool.query(
+    `SELECT domain, month, organic_traffic
+     FROM domain_traffic_monthly
+     WHERE domain = ANY(ARRAY[${placeholders}]::text[])
+     ORDER BY domain, month ASC`,
+    domains
+  );
+
+  const latestByDomain = new Map<string, Record<string, unknown>>();
+  for (const r of latest.rows) latestByDomain.set(r.domain as string, r);
+
+  const monthlyByDomain = new Map<
+    string,
+    Array<{ month: string; organicTraffic: number | null }>
+  >();
+  for (const r of monthly.rows) {
+    const arr = monthlyByDomain.get(r.domain as string) ?? [];
+    arr.push({
+      month: toMonthString(r.month),
+      organicTraffic: r.organic_traffic as number | null,
+    });
+    monthlyByDomain.set(r.domain as string, arr);
+  }
+
+  return domains.map((domain) => {
+    const snap = latestByDomain.get(domain);
+    const series = monthlyByDomain.get(domain) ?? [];
+    return {
+      domain,
+      hasData: Boolean(snap) || series.length > 0,
+      latestDataCapturedAt: toIsoOrNull(snap?.data_captured_at),
+      trafficMonthlyAvg: (snap?.traffic_monthly_avg as number | null) ?? null,
+      trafficValueMonthlyAvg:
+        (snap?.traffic_value_monthly_avg as number | null) ?? null,
+      topPages: snap?.top_pages ?? null,
+      topCountries: snap?.top_countries ?? null,
+      topKeywords: snap?.top_keywords ?? null,
+      monthlyOrganicTraffic: series,
+    };
+  });
 };
 
 const mapDrRow = (row: Record<string, unknown>) => ({
