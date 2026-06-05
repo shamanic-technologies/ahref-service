@@ -14,6 +14,7 @@ import {
   trafficResponseSchema,
   aiVisibilityBodySchema,
   aiVisibilityResponseSchema,
+  aiVisibilityCachedResponseSchema,
 } from "./schemas/apify-ahref";
 
 const registry = new OpenAPIRegistry();
@@ -35,6 +36,7 @@ registry.register("TrafficComputeBody", trafficComputeBodySchema);
 registry.register("TrafficResponse", trafficResponseSchema);
 registry.register("AiVisibilityBody", aiVisibilityBodySchema);
 registry.register("AiVisibilityResponse", aiVisibilityResponseSchema);
+registry.register("AiVisibilityCachedResponse", aiVisibilityCachedResponseSchema);
 
 // Health
 registry.registerPath({
@@ -161,6 +163,36 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.array(trafficResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
+// GET /orgs/domains/ai-visibility
+registry.registerPath({
+  method: "get",
+  path: "/orgs/domains/ai-visibility",
+  summary:
+    "Get the cached Brand-Radar AI-visibility snapshot for domains (read-only, no scrape, no cost)",
+  request: {
+    headers: orgHeaders,
+    query: z.object({
+      domains: z
+        .string()
+        .describe(
+          "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
+        ),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "Cached AI-visibility snapshot per domain (absent-shaped when nothing is cached yet — never scrapes)",
+      content: {
+        "application/json": {
+          schema: z.array(aiVisibilityCachedResponseSchema),
         },
       },
     },
