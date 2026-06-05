@@ -3,7 +3,10 @@ import { getPool } from "../db";
 import { getDrStatus, getTrafficHistory } from "../services/ahref";
 import { computeDr } from "../services/dr-compute";
 import { computeTraffic } from "../services/traffic-compute";
-import { getOrComputeAiVisibility } from "../services/ai-visibility";
+import {
+  getAiVisibilityCached,
+  getOrComputeAiVisibility,
+} from "../services/ai-visibility";
 import {
   drComputeBodySchema,
   trafficComputeBodySchema,
@@ -142,6 +145,43 @@ export const createOrgsDomainsRouter = () => {
       }
       console.error("[ahref-service] Error computing traffic:", error);
       res.status(502).json({ error: "Failed to compute traffic", detail: message });
+    }
+  });
+
+  // GET /orgs/domains/ai-visibility?domains=a.com,b.com,...
+  // Pure read of the AI-visibility cache: the latest Brand-Radar snapshot per
+  // domain (lean shape, no `raw`). No Apify scrape, no cost — mirrors dr-status
+  // / traffic-history. The POST on this same path owns the metered refresh.
+  router.get("/ai-visibility", async (req: Request, res: Response) => {
+    try {
+      const raw = req.query.domains;
+      if (!raw || typeof raw !== "string") {
+        res.status(400).json({ error: "domains query parameter is required" });
+        return;
+      }
+
+      const inputs = raw.split(",").map((d) => d.trim()).filter(Boolean);
+      if (inputs.length === 0) {
+        res.status(400).json({ error: "domains query parameter is required" });
+        return;
+      }
+
+      let domains: string[];
+      try {
+        // Normalize + dedupe so www/non-www and casing collapse to one key.
+        domains = [...new Set(inputs.map(normalizeDomain))];
+      } catch (err) {
+        res
+          .status(400)
+          .json({ error: err instanceof Error ? err.message : "Invalid domain" });
+        return;
+      }
+
+      const result = await getAiVisibilityCached(getPool(), domains);
+      res.json(result);
+    } catch (error) {
+      console.error("[ahref-service] Error fetching AI-visibility cache:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
