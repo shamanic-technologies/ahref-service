@@ -46,6 +46,16 @@ export interface AiVisibilityResponse {
   raw: Record<string, unknown>;
 }
 
+/** Lean cached snapshot — the read-only GET shape: the POST success shape minus
+ * the scrape-only fields (`fetchedFromCache`, `raw`). */
+export interface AiVisibilityCachedResponse {
+  domain: string;
+  snapshotDate: string | null;
+  mentionsTotal: number;
+  mentionsByEngine: MentionsByEngine[];
+  topCompetitors: TopCompetitor[];
+}
+
 /**
  * Stable lower-snake-case engine key from the actor's model name.
  * `Chatgpt` → `chatgpt`, `GoogleAIOverviews` → `google_ai_overviews`,
@@ -135,6 +145,65 @@ const readLatest = async (
 
 const isFresh = (capturedAt: Date | string): boolean =>
   Date.now() - toIso(capturedAt).getTime() < TTL_MS;
+
+interface AiVisibilityCachedRow {
+  domain: string;
+  data_captured_at: Date | string;
+  ai_mentions_total: number | null;
+  ai_mentions_by_engine: MentionsByEngine[] | null;
+  ai_top_competitors: TopCompetitor[] | null;
+}
+
+/**
+ * Read the latest cached Brand-Radar AI-visibility snapshot for a set of
+ * domains. Domains MUST already be normalized by the caller. This is a PURE
+ * read of `v_domains_ai_visibility_latest`:
+ *   - NO freshness gate — returns the latest snapshot even if stale (the POST
+ *     owns the on-demand refresh); a stale read never triggers a scrape.
+ *   - NO Apify scrape, NO cost declaration, NO authorize, NO brand resolve.
+ * A never-scraped domain comes back absent-shaped (snapshotDate null, zero
+ * mentions, empty arrays) — never a 404, never omitted from the array.
+ */
+export const getAiVisibilityCached = async (
+  pool: Pool,
+  domains: string[]
+): Promise<AiVisibilityCachedResponse[]> => {
+  if (domains.length === 0) return [];
+
+  const placeholders = domains.map((_, i) => `$${i + 1}`).join(",");
+  const result = await pool.query(
+    `SELECT domain, data_captured_at, ai_mentions_total, ai_mentions_by_engine,
+            ai_top_competitors
+     FROM v_domains_ai_visibility_latest
+     WHERE domain = ANY(ARRAY[${placeholders}]::text[])`,
+    domains
+  );
+
+  const byDomain = new Map<string, AiVisibilityCachedRow>();
+  for (const row of result.rows as AiVisibilityCachedRow[]) {
+    byDomain.set(row.domain, row);
+  }
+
+  return domains.map((domain) => {
+    const row = byDomain.get(domain);
+    if (!row) {
+      return {
+        domain,
+        snapshotDate: null,
+        mentionsTotal: 0,
+        mentionsByEngine: [],
+        topCompetitors: [],
+      };
+    }
+    return {
+      domain,
+      snapshotDate: snapshotDateOf(row.data_captured_at),
+      mentionsTotal: row.ai_mentions_total ?? 0,
+      mentionsByEngine: row.ai_mentions_by_engine ?? [],
+      topCompetitors: row.ai_top_competitors ?? [],
+    };
+  });
+};
 
 /** Persist one AI-visibility snapshot (append-only history; cache = latest row). */
 const insertSnapshot = async (

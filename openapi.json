@@ -396,6 +396,78 @@
           "topCompetitors",
           "raw"
         ]
+      },
+      "AiVisibilityCachedResponse": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "snapshotDate": {
+            "type": "string",
+            "nullable": true,
+            "description": "Date the cached AI-visibility data reflects (extraction date); null when nothing is cached yet."
+          },
+          "mentionsTotal": {
+            "type": "integer",
+            "description": "Global brand mentions across all AI engines (0 when uncached)."
+          },
+          "mentionsByEngine": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "engine": {
+                  "type": "string",
+                  "description": "Lower-snake-case stable engine key."
+                },
+                "mentions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "engine",
+                "mentions"
+              ]
+            }
+          },
+          "topCompetitors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "brandId": {
+                  "type": "string",
+                  "description": "Global brand-service brand id."
+                },
+                "brand": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "domain": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "citations": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "brandId",
+                "brand",
+                "domain",
+                "citations"
+              ]
+            }
+          }
+        },
+        "required": [
+          "domain",
+          "snapshotDate",
+          "mentionsTotal",
+          "mentionsByEngine",
+          "topCompetitors"
+        ]
       }
     },
     "parameters": {},
@@ -722,6 +794,74 @@
       }
     },
     "/orgs/domains/ai-visibility": {
+      "get": {
+        "summary": "Get the cached Brand-Radar AI-visibility snapshot for domains (read-only, no scrape, no cost)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct."
+            },
+            "required": true,
+            "description": "Comma-separated domains. Normalized server-side: www stripped, case-folded; other subdomains kept distinct.",
+            "name": "domains",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Org UUID from client-service (required)"
+            },
+            "required": true,
+            "description": "Org UUID from client-service (required)",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User UUID from client-service"
+            },
+            "required": false,
+            "description": "User UUID from client-service",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID from runs-service"
+            },
+            "required": false,
+            "description": "Caller's run ID from runs-service",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cached AI-visibility snapshot per domain (absent-shaped when nothing is cached yet — never scrapes)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AiVisibilityCachedResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "summary": "Get-or-refresh Ahrefs Brand-Radar AI-visibility stats for a domain (declares cost + authorizes on scrape)",
         "security": [

@@ -353,3 +353,112 @@ describe("POST /orgs/domains/ai-visibility", () => {
     expect(idxOf(brandResolveCall)).toBeGreaterThanOrEqual(0);
   });
 });
+
+const cachedRow = (overrides: Record<string, unknown> = {}) => ({
+  domain: "example.com",
+  data_captured_at: new Date(),
+  ai_mentions_total: 555,
+  ai_mentions_by_engine: [{ engine: "chatgpt", mentions: 555 }],
+  ai_top_competitors: [
+    { brandId: "cached-brand", brand: "Cached", domain: "cached.com", citations: 42 },
+  ],
+  ...overrides,
+});
+
+describe("GET /orgs/domains/ai-visibility (read-only cache)", () => {
+  it("cache hit: returns lean snapshot, zero side effects (no scrape/cost/brand)", async () => {
+    setMockResult(VIEW, [cachedRow()]);
+
+    const res = await withOrg(
+      request(app).get("/orgs/domains/ai-visibility?domains=example.com")
+    );
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(1);
+    const el = res.body[0];
+    expect(el.domain).toBe("example.com");
+    expect(el.snapshotDate).toBe(new Date().toISOString().slice(0, 10));
+    expect(el.mentionsTotal).toBe(555);
+    expect(el.mentionsByEngine).toEqual([{ engine: "chatgpt", mentions: 555 }]);
+    expect(el.topCompetitors[0].brandId).toBe("cached-brand");
+    // Lean shape: scrape-only fields are dropped.
+    expect(el).not.toHaveProperty("fetchedFromCache");
+    expect(el).not.toHaveProperty("raw");
+    // Pure read — NO scrape / cost / authorize / brand-resolve HTTP at all.
+    expect(calls.length).toBe(0);
+  });
+
+  it("uncached domain: absent-shaped element, no scrape, 200 (not 404)", async () => {
+    // No mock row set → the view returns no rows for this domain.
+    const res = await withOrg(
+      request(app).get("/orgs/domains/ai-visibility?domains=never-seen.com")
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        domain: "never-seen.com",
+        snapshotDate: null,
+        mentionsTotal: 0,
+        mentionsByEngine: [],
+        topCompetitors: [],
+      },
+    ]);
+    expect(calls.length).toBe(0);
+  });
+
+  it("stale snapshot is still returned (no freshness gate, no scrape)", async () => {
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30d ≫ 6d POST TTL
+    setMockResult(VIEW, [cachedRow({ data_captured_at: old })]);
+
+    const res = await withOrg(
+      request(app).get("/orgs/domains/ai-visibility?domains=example.com")
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].snapshotDate).toBe(old.toISOString().slice(0, 10));
+    expect(res.body[0].mentionsTotal).toBe(555);
+    // A stale snapshot must NOT trigger a refresh on the read path.
+    expect(calls.length).toBe(0);
+  });
+
+  it("multi-domain csv → array preserving order, mix of cached + absent", async () => {
+    setMockResult(VIEW, [cachedRow({ domain: "example.com" })]);
+
+    const res = await withOrg(
+      request(app).get("/orgs/domains/ai-visibility?domains=example.com,unseen.com")
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].domain).toBe("example.com");
+    expect(res.body[0].mentionsTotal).toBe(555);
+    expect(res.body[1].domain).toBe("unseen.com");
+    expect(res.body[1].snapshotDate).toBeNull();
+    expect(res.body[1].mentionsTotal).toBe(0);
+    expect(res.body[1].mentionsByEngine).toEqual([]);
+    expect(calls.length).toBe(0);
+  });
+
+  it("400 when the domains query param is missing", async () => {
+    const res = await withOrg(request(app).get("/orgs/domains/ai-visibility"));
+    expect(res.status).toBe(400);
+    expect(calls.length).toBe(0);
+  });
+
+  it("normalizes + dedupes www/casing to a single key", async () => {
+    setMockResult(VIEW, [cachedRow({ domain: "example.com" })]);
+
+    const res = await withOrg(
+      request(app).get(
+        "/orgs/domains/ai-visibility?domains=Example.com,www.example.com"
+      )
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].domain).toBe("example.com");
+    expect(calls.length).toBe(0);
+  });
+});

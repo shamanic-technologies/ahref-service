@@ -138,6 +138,40 @@ export const aiVisibilityResponseSchema = z
   })
   .openapi("AiVisibilityResponse");
 
+// Response for GET /orgs/domains/ai-visibility — read-only cache. One element
+// per requested domain: the POST success shape minus the scrape-only fields
+// (`fetchedFromCache`, `raw`). An uncached domain comes back absent-shaped
+// (snapshotDate null, zero mentions, empty arrays) — never omitted, never 404.
+export const aiVisibilityCachedResponseSchema = z
+  .object({
+    domain: z.string(),
+    snapshotDate: z
+      .string()
+      .nullable()
+      .describe(
+        "Date the cached AI-visibility data reflects (extraction date); null when nothing is cached yet."
+      ),
+    mentionsTotal: z
+      .number()
+      .int()
+      .describe("Global brand mentions across all AI engines (0 when uncached)."),
+    mentionsByEngine: z.array(
+      z.object({
+        engine: z.string().describe("Lower-snake-case stable engine key."),
+        mentions: z.number().int(),
+      })
+    ),
+    topCompetitors: z.array(
+      z.object({
+        brandId: z.string().describe("Global brand-service brand id."),
+        brand: z.string().nullable(),
+        domain: z.string().nullable(),
+        citations: z.number().int(),
+      })
+    ),
+  })
+  .openapi("AiVisibilityCachedResponse");
+
 export const lowDrResponseSchema = z
   .object({
     domain: z.string(),
