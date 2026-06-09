@@ -31,11 +31,12 @@ never a silent empty key.
 | POST | `/orgs/domains/ai-visibility` | org (`x-api-key` + `x-org-id`) | Get-or-refresh Ahrefs Brand-Radar AI-visibility for `{domain}`: cached if fresh, else scrape. **Metered on scrape — declares cost + authorizes.** |
 | GET | `/internal/domains/dr-stale` | internal (`x-api-key`) | Known domains whose DR is now stale |
 | GET | `/internal/domains/low-domain-rating` | internal (`x-api-key`) | Known domains with DR < 10 |
+| POST | `/internal/domains/dr-compute` | internal (`x-api-key`) | Platform/service-auth trigger: compute missing/stale DR for `{domains}` without org identity. Fresh cached domains are returned without scrape. **Metered as platform run cost; no org authorization.** |
 | POST | `/internal/domains/domain-rating` | internal (`x-api-key`) | Ingest scraped Ahrefs data (domain in body). `dataType:"traffic"` rows are also promoted to silver. |
 
 ## DR compute (on-demand scrape)
 
-`POST /orgs/domains/dr-compute` is the only endpoint that spends. It scrapes
+`POST /orgs/domains/dr-compute` is the org-scoped endpoint that spends. It scrapes
 Ahrefs via the Apify actor `pro100chok/ahrefs-seo-tools` (`pC8gsptNv2RwJm0QE`),
 `searchType: website_authority` (DR + backlink/refdomain counts). Per metered
 spend it follows the strict order, fail-loud at every step (any failure → 502):
@@ -52,6 +53,15 @@ The cost unit is uniform per Apify result regardless of search type, so traffic 
 AI-visibility can later be added under the same `apify-ahrefs-result` cost name.
 DR is global reference data, so the persisted rating row carries no `org_id` —
 org attribution lives on the run + cost.
+
+`POST /internal/domains/dr-compute` is the platform/service-auth counterpart for
+backend services that do not have org identity. It accepts the same `{domains}`
+body, requires only `x-api-key`, and callers do not send `x-org-id`, `x-user-id`,
+campaign, brand, feature, or workflow headers. Ahref-service normalizes/dedupes
+the domains, reads its domain-keyed cache, and scrapes only domains whose DR is
+missing/stale. Platform work creates a runs-service platform run and records an
+`apify-ahrefs-result` platform cost after the scrape returns the charged result
+count; there is no org balance authorization because no org is being charged.
 
 ## Traffic compute (on-demand scrape)
 
