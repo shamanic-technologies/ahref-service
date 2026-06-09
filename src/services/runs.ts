@@ -40,6 +40,12 @@ const post = async (url: string, body: unknown, headers: Record<string, string>)
   return res.json();
 };
 
+const buildPlatformHeaders = (apiKey: string): Record<string, string> => ({
+  "Content-Type": "application/json",
+  "x-api-key": apiKey,
+  "x-service-name": SERVICE_NAME,
+});
+
 /**
  * Create this service's own run for the DR-compute request. The inbound
  * caller's run id (ctx.runId) is forwarded as x-run-id, so runs-service links
@@ -55,6 +61,17 @@ export const createChildRun = async (taskName: string, ctx: OrgContext): Promise
   return data.id;
 };
 
+/** Create an org-less platform run for internal/service-auth work. */
+export const createPlatformRun = async (taskName: string): Promise<string> => {
+  const { runsServiceUrl, runsServiceApiKey } = getDownstreamConfig();
+  const data = (await post(
+    `${runsServiceUrl}/v1/platform-runs`,
+    { serviceName: SERVICE_NAME, taskName },
+    buildPlatformHeaders(runsServiceApiKey)
+  )) as { id: string };
+  return data.id;
+};
+
 /** Add a single cost line item to a run. Returns the created cost id. */
 export const addCost = async (
   runId: string,
@@ -66,6 +83,20 @@ export const addCost = async (
     `${runsServiceUrl}/v1/runs/${runId}/costs`,
     { items: [item] },
     buildServiceHeaders(runsServiceApiKey, ctx, runId)
+  )) as { costs: Array<{ id: string }> };
+  return data.costs[0].id;
+};
+
+/** Add a cost line item to a platform run. */
+export const addPlatformCost = async (
+  runId: string,
+  item: CostItem
+): Promise<string> => {
+  const { runsServiceUrl, runsServiceApiKey } = getDownstreamConfig();
+  const data = (await post(
+    `${runsServiceUrl}/v1/platform-runs/${runId}/costs`,
+    { items: [item] },
+    buildPlatformHeaders(runsServiceApiKey)
   )) as { costs: Array<{ id: string }> };
   return data.costs[0].id;
 };
@@ -111,6 +142,32 @@ export const closeRun = async (
     res = await fetch(url, {
       method: "PATCH",
       headers: buildServiceHeaders(runsServiceApiKey, ctx, runId),
+      body: JSON.stringify({ status }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ahref-service] runs-service PATCH ${url} fetch failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`[ahref-service] runs-service PATCH ${url} failed (${res.status}): ${text}`);
+  }
+};
+
+/** Close an org-less platform run. */
+export const closePlatformRun = async (
+  runId: string,
+  status: "completed" | "failed"
+): Promise<void> => {
+  const { runsServiceUrl, runsServiceApiKey } = getDownstreamConfig();
+  const url = `${runsServiceUrl}/v1/platform-runs/${runId}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "PATCH",
+      headers: buildPlatformHeaders(runsServiceApiKey),
       body: JSON.stringify({ status }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

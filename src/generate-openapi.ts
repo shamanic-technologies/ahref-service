@@ -266,6 +266,36 @@ registry.registerPath({
   security: [{ apiKey: [] }],
 });
 
+// POST /internal/domains/dr-compute
+registry.registerPath({
+  method: "post",
+  path: "/internal/domains/dr-compute",
+  summary: "Compute missing/stale DR for domains with service auth only",
+  description:
+    "Platform/internal trigger for backend services that do not have org-scoped identity. Requires only x-api-key; callers must not pass x-org-id, x-user-id, campaign, brand, feature, or workflow headers. Ahref-service normalizes/dedupes domains, skips fresh cached DR, owns the Apify scrape, and records platform run cost.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: drComputeBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "DR status for the requested domains after computing missing/stale entries; fresh cached domains are returned without scraping",
+      content: {
+        "application/json": {
+          schema: z.array(drStatusResponseSchema),
+        },
+      },
+    },
+  },
+  security: [{ apiKey: [] }],
+});
+
 // POST /internal/domains/domain-rating
 registry.registerPath({
   method: "post",

@@ -977,6 +977,41 @@
         }
       }
     },
+    "/internal/domains/dr-compute": {
+      "post": {
+        "summary": "Compute missing/stale DR for domains with service auth only",
+        "description": "Platform/internal trigger for backend services that do not have org-scoped identity. Requires only x-api-key; callers must not pass x-org-id, x-user-id, campaign, brand, feature, or workflow headers. Ahref-service normalizes/dedupes domains, skips fresh cached DR, owns the Apify scrape, and records platform run cost.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrComputeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "DR status for the requested domains after computing missing/stale entries; fresh cached domains are returned without scraping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrStatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/domains/domain-rating": {
       "post": {
         "summary": "Ingest scraped Ahrefs data for a domain (platform worker)",

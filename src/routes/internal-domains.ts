@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getPool } from "../db";
-import { updateDomainRatingBodySchema } from "../schemas/apify-ahref";
+import { drComputeBodySchema, updateDomainRatingBodySchema } from "../schemas/apify-ahref";
+import { computeMissingPlatformDr } from "../services/dr-compute";
 import {
   getDrStale,
   getLowDomainRating,
@@ -38,6 +39,30 @@ export const createInternalDomainsRouter = () => {
     } catch (error) {
       console.error("[ahref-service] Error fetching low DR domains:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /internal/domains/dr-compute — platform/service-auth DR compute for
+  // backend callers without org identity. Scrapes only domains the ahref cache
+  // marks missing/stale; fresh cached domains are returned without spend.
+  router.post("/dr-compute", async (req: Request, res: Response) => {
+    const parsed = drComputeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const result = await computeMissingPlatformDr(getPool(), parsed.data.domains);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("normalizeDomain")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      console.error("[ahref-service] Error computing platform DR:", error);
+      res.status(502).json({ error: "Failed to compute platform DR", detail: message });
     }
   });
 
