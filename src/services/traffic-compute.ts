@@ -6,6 +6,11 @@ import { runTrafficScrape, type ApifyTrafficResult } from "./apify";
 import { getPlatformKey } from "./key";
 import { authorize } from "./billing";
 import { addCost, closeRun, createChildRun, setCostStatus } from "./runs";
+import {
+  enqueueDomainMetricJobs,
+  scheduleDomainMetricWorker,
+  type DomainMetricJob,
+} from "./domain-metric-jobs";
 
 /** Byte-equal to the costs-service catalog row. Mismatch ⇒ runs-service 422. */
 const COST_NAME = "apify-ahrefs-result";
@@ -42,10 +47,15 @@ const mapResultToBody = (r: ApifyTrafficResult) => ({
  * Traffic is global reference data (not org-scoped); org attribution lives on
  * the run + cost, not on the persisted rows.
  */
-export const computeTraffic = async (pool: Pool, domains: string[], ctx: OrgContext) => {
+const executeTrafficCompute = async (
+  pool: Pool,
+  domains: string[],
+  ctx: OrgContext
+) => {
   // Normalize + dedupe so www/non-www and casing collapse to one key. Throws on
   // an unusable domain (→ 400 at the route).
   const normalized = [...new Set(domains.map(normalizeDomain))];
+  if (normalized.length === 0) return;
 
   const runId = await createChildRun("traffic-compute", ctx);
   let provisionCostId: string | null = null;
@@ -97,9 +107,6 @@ export const computeTraffic = async (pool: Pool, domains: string[], ctx: OrgCont
     await setCostStatus(runId, provisionCostId, "cancelled", ctx);
 
     await closeRun(runId, "completed", ctx);
-
-    // Read the freshly-persisted traffic back from silver/gold for the response.
-    return await getTrafficHistory(pool, normalized);
   } catch (err) {
     // Cleanup is best-effort; the original error is what fails the request loud.
     if (provisionCostId) {
@@ -119,4 +126,51 @@ export const computeTraffic = async (pool: Pool, domains: string[], ctx: OrgCont
     }
     throw err;
   }
+};
+
+const processOrgTrafficJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
+  if (jobs.length === 0) return;
+
+  const domains = [...new Set(jobs.map((job) => job.domain))];
+  const before = await getTrafficHistory(pool, domains);
+  const domainsToScrape = [
+    ...new Set(
+      before.filter((status) => !status.hasData).map((status) => status.domain)
+    ),
+  ];
+  if (domainsToScrape.length === 0) return;
+
+  const first = jobs[0];
+  await executeTrafficCompute(pool, domainsToScrape, {
+    orgId: first.orgId,
+    userId: first.userId,
+    runId: first.parentRunId,
+  });
+};
+
+/**
+ * Request a traffic refresh without holding the HTTP caller open for Apify.
+ * The response remains the existing traffic read shape; domains with no saved
+ * traffic are queued and become visible after the background worker persists
+ * the bronze + silver rows.
+ */
+export const computeTraffic = async (
+  pool: Pool,
+  domains: string[],
+  ctx: OrgContext
+) => {
+  const normalized = [...new Set(domains.map(normalizeDomain))];
+  const before = await getTrafficHistory(pool, normalized);
+  const domainsToQueue = [
+    ...new Set(before.filter((status) => !status.hasData).map((status) => status.domain)),
+  ];
+
+  if (domainsToQueue.length > 0) {
+    await enqueueDomainMetricJobs(pool, "traffic", domainsToQueue, ctx);
+    scheduleDomainMetricWorker(pool, "traffic", ctx.orgId, (jobs) =>
+      processOrgTrafficJobs(pool, jobs)
+    );
+  }
+
+  return before;
 };

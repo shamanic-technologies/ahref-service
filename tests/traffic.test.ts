@@ -11,7 +11,18 @@ process.env.KEY_SERVICE_URL = "http://key.test";
 process.env.KEY_SERVICE_API_KEY = "key-key";
 
 import { createApp } from "../src/app";
-import { setMockResult, clearMocks, getMockPool, getInsertApifyId } from "./setup";
+import {
+  setMockResult,
+  clearMocks,
+  getMockPool,
+  getInsertApifyId,
+  getMetricJobs,
+} from "./setup";
+import {
+  resetDomainMetricWorkersForTest,
+  setDomainMetricWorkerAutoStartForTest,
+  waitForDomainMetricWorkersForTest,
+} from "../src/services/domain-metric-jobs";
 
 const API_KEY = "test-api-key";
 const app = createApp({ apiKey: API_KEY });
@@ -57,7 +68,7 @@ let calls: Call[];
 
 interface Overrides {
   authorizeSufficient?: boolean;
-  apifyRunStatus?: string;
+  apifyRunStatus?: string | (() => string);
 }
 let overrides: Overrides;
 
@@ -99,7 +110,10 @@ beforeEach(() => {
       return makeRes(201, {
         data: {
           id: "apify-run-1",
-          status: overrides.apifyRunStatus ?? "SUCCEEDED",
+          status:
+            typeof overrides.apifyRunStatus === "function"
+              ? overrides.apifyRunStatus()
+              : overrides.apifyRunStatus ?? "SUCCEEDED",
           defaultDatasetId: "ds-1",
           chargedEventCounts: { "apify-default-dataset-item": 1 },
         },
@@ -128,6 +142,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetDomainMetricWorkersForTest();
   vi.restoreAllMocks();
 });
 
@@ -144,7 +159,7 @@ describe("POST /orgs/domains/traffic-compute", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("happy path: scrapes traffic_overview, persists, promotes silver, returns series", async () => {
+  it("returns existing traffic without queuing vendor work", async () => {
     setMockResult(LATEST_VIEW, [snapshotRow("example.com")]);
     setMockResult(MONTHLY_TABLE, monthlyRows("example.com"));
 
@@ -162,6 +177,77 @@ describe("POST /orgs/domains/traffic-compute", () => {
       { month: "2026-01-01", organicTraffic: 5820145 },
       { month: "2026-02-01", organicTraffic: 4505125 },
     ]);
+    expect(getMetricJobs()).toHaveLength(0);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("queues missing traffic and returns promptly with the current read shape", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+
+    const res = await withOrg(
+      request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        domain: "example.com",
+        hasData: false,
+        latestDataCapturedAt: null,
+        trafficMonthlyAvg: null,
+        trafficValueMonthlyAvg: null,
+        topPages: null,
+        topCountries: null,
+        topKeywords: null,
+        monthlyOrganicTraffic: [],
+      },
+    ]);
+    expect(getMetricJobs()).toHaveLength(1);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("returns promptly without entering Apify when the underlying run would exceed the old 180s wait window", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+    overrides.apifyRunStatus = "RUNNING";
+
+    const res = await withOrg(
+      request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].hasData).toBe(false);
+    expect(getMetricJobs()[0].status).toBe("pending");
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("coalesces repeated missing traffic requests for the same org/domain", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+
+    await withOrg(
+      request(app).post("/orgs/domains/traffic-compute").send({ domains: ["Example.com"] })
+    );
+    await withOrg(
+      request(app).post("/orgs/domains/traffic-compute").send({ domains: ["www.example.com"] })
+    );
+
+    expect(getMetricJobs()).toHaveLength(1);
+    expect(getMetricJobs()[0]).toMatchObject({
+      org_id: ORG_ID,
+      metric: "traffic",
+      domain: "example.com",
+      status: "pending",
+    });
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("background worker scrapes traffic_overview, persists, and promotes silver", async () => {
+    const res = await withOrg(
+      request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
+    );
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("succeeded");
 
     // The actor was driven with the traffic_overview search type.
     const apifyRun = calls.find(apifyRunCall);
@@ -179,10 +265,12 @@ describe("POST /orgs/domains/traffic-compute", () => {
     expect(queryTexts().filter((t) => t.includes("INSERT INTO domain_traffic_monthly")).length).toBe(2);
   });
 
-  it("declares cost in order: PROVISION → AUTHORIZE → EXECUTE(apify)", async () => {
+  it("declares background cost in order: PROVISION → AUTHORIZE → EXECUTE(apify)", async () => {
     const res = await withOrg(
       request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
     );
+    await waitForDomainMetricWorkersForTest();
+
     expect(res.status).toBe(200);
     const provisionIdx = idxOf(provisionCall);
     const authorizeIdx = idxOf(authorizeCall);
@@ -192,22 +280,34 @@ describe("POST /orgs/domains/traffic-compute", () => {
     expect(authorizeIdx).toBeLessThan(apifyIdx);
   });
 
-  it("502 when authorize is insufficient — no Apify call, hold cancelled", async () => {
+  it("does not fail the caller when background authorize is insufficient", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     overrides.authorizeSufficient = false;
+
     const res = await withOrg(
       request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf(apifyRunCall)).toBe(-1);
     expect(idxOf((c) => c.url.includes("/costs/") && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
   });
 
-  it("502 when the Apify run fails — hold cancelled, run closed failed", async () => {
+  it("does not fail the caller when the background Apify run fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     overrides.apifyRunStatus = "FAILED";
+
     const res = await withOrg(
       request(app).post("/orgs/domains/traffic-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf((c) => c.url.includes("/costs/") && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
     expect(idxOf((c) => /\/v1\/runs\/[^/]+$/.test(c.url) && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
   });

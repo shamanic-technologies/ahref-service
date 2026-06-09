@@ -25,9 +25,9 @@ never a silent empty key.
 | Method | Path | Tier | Purpose |
 |--------|------|------|---------|
 | GET | `/orgs/domains/dr-status?domains=a.com,b.com` | org (`x-api-key` + `x-org-id`) | DR status for domains; unknown domain → "needs update". **Pure read — no spend.** |
-| POST | `/orgs/domains/dr-compute` | org (`x-api-key` + `x-org-id`) | On-demand: scrape Ahrefs DR for `{domains}` via Apify, persist, return DR. **Metered — declares cost + authorizes.** |
+| POST | `/orgs/domains/dr-compute` | org (`x-api-key` + `x-org-id`) | Fire-and-forget DR request for `{domains}`. Fresh cached domains return immediately; missing/stale domains are queued and computed in the background. **Metered in background — declares cost + authorizes before Apify.** |
 | GET | `/orgs/domains/traffic-history?domains=a.com,b.com` | org (`x-api-key` + `x-org-id`) | Latest traffic snapshot + monthly organic series per domain; unknown → `hasData:false`. **Pure read — no spend.** |
-| POST | `/orgs/domains/traffic-compute` | org (`x-api-key` + `x-org-id`) | On-demand: scrape Ahrefs traffic for `{domains}` via Apify, persist (bronze + silver), return the series. **Metered — declares cost + authorizes.** |
+| POST | `/orgs/domains/traffic-compute` | org (`x-api-key` + `x-org-id`) | Fire-and-forget traffic request for `{domains}`. Existing saved traffic returns immediately; missing domains are queued and computed in the background. **Metered in background — declares cost + authorizes before Apify.** |
 | POST | `/orgs/domains/ai-visibility` | org (`x-api-key` + `x-org-id`) | Get-or-refresh Ahrefs Brand-Radar AI-visibility for `{domain}`: cached if fresh, else scrape. **Metered on scrape — declares cost + authorizes.** |
 | GET | `/internal/domains/dr-stale` | internal (`x-api-key`) | Known domains whose DR is now stale |
 | GET | `/internal/domains/low-domain-rating` | internal (`x-api-key`) | Known domains with DR < 10 |
@@ -36,10 +36,20 @@ never a silent empty key.
 
 ## DR compute (on-demand scrape)
 
-`POST /orgs/domains/dr-compute` is the org-scoped endpoint that spends. It scrapes
-Ahrefs via the Apify actor `pro100chok/ahrefs-seo-tools` (`pC8gsptNv2RwJm0QE`),
-`searchType: website_authority` (DR + backlink/refdomain counts). Per metered
-spend it follows the strict order, fail-loud at every step (any failure → 502):
+`POST /orgs/domains/dr-compute` is the org-scoped fire-and-forget trigger for DR.
+It returns the existing DR status response shape immediately. Fresh cached
+domains are not queued. Missing/stale domains are upserted into
+`domain_metric_compute_jobs` and a background worker scrapes Ahrefs via the
+Apify actor `pro100chok/ahrefs-seo-tools` (`pC8gsptNv2RwJm0QE`),
+`searchType: website_authority` (DR + backlink/refdomain counts).
+
+The queue is unique on `(org_id, metric, domain)`, so repeated clicks for the
+same org/domain/metric coalesce instead of starting duplicate Apify runs. The
+HTTP request does not wait for Apify completion; callers read the saved values
+later through `dr-status` after the worker persists them.
+
+The background worker follows the strict metered order, fail-loud at every step
+(any failure is logged and marked on the job row):
 
 1. **PROVISION** — `runs-service` cost `apify-ahrefs-result` (`costSource:"org"`),
    quantity = number of domains.
@@ -65,10 +75,16 @@ count; there is no org balance authorization because no org is being charged.
 
 ## Traffic compute (on-demand scrape)
 
-`POST /orgs/domains/traffic-compute` mirrors `dr-compute` for the actor's
+`POST /orgs/domains/traffic-compute` mirrors the org DR trigger for the actor's
 `searchType: traffic_overview` (monthly organic traffic + value + history + top
-pages/countries/keywords). Same metered order, same `apify-ahrefs-result` cost
-(the Apify result unit is uniform per search type), fail-loud at every step.
+pages/countries/keywords). It returns the existing traffic read response shape
+immediately. Domains that already have saved traffic are not queued; missing
+domains are coalesced in `domain_metric_compute_jobs` and processed by the
+background worker.
+
+The worker uses the same metered order, same `apify-ahrefs-result` cost (the
+Apify result unit is uniform per search type), and fail-loud background logging
++ job failure state.
 
 The dashboard is expected to call this **once a month per brand** (the caller
 resolves brand → domain; this service stays domain-centric). One scrape returns
@@ -83,6 +99,7 @@ monthly re-runs extend and refresh it.
 | **Silver** | `domain_traffic_monthly` | One row per `(domain, month)`, organic traffic exploded from bronze `traffic_history`. Last-write-wins by `data_captured_at`. The historized series. |
 | **Silver** | `domain_traffic_snapshot` | One row per scrape: monthly traffic avg, **traffic value ($)**, top pages/countries/keywords. Ahrefs gives no value-history, so a value series accrues here over monthly scrapes. |
 | **Gold** | `v_domain_traffic_latest` | Latest snapshot per domain (dashboard read). |
+| **Queue** | `domain_metric_compute_jobs` | Fire-and-forget DR/traffic work queue. One row per `(org_id, metric, domain)` coalesces duplicate requests and records pending/running/succeeded/failed state plus `last_error`. |
 
 Silver promotion is deterministic (no LLM — structured JSON) and runs inside the
 bronze ingest for `dataType:"traffic"` rows, so any path that writes a traffic

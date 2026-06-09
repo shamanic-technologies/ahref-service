@@ -13,6 +13,7 @@ const RESULT_EVENT = "apify-default-dataset-item";
 const START_WAIT_SECS = 60; // Apify caps waitForFinish at 60s per call.
 const POLL_INTERVAL_MS = 4_000;
 const MAX_WAIT_MS = 180_000;
+const DOMAIN_METRIC_MAX_WAIT_MS = 15 * 60_000;
 
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]);
 
@@ -102,10 +103,12 @@ const runActorScrape = async (
   )) as { data: ApifyRunData };
 
   let run = startResp.data;
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + DOMAIN_METRIC_MAX_WAIT_MS;
   while (!TERMINAL.has(run.status)) {
     if (Date.now() > deadline) {
-      throw new Error(`[ahref-service] Apify run ${run.id} did not finish within ${MAX_WAIT_MS}ms`);
+      throw new Error(
+        `[ahref-service] Apify run ${run.id} did not finish within ${DOMAIN_METRIC_MAX_WAIT_MS}ms`
+      );
     }
     await sleep(POLL_INTERVAL_MS);
     const polled = (await apifyFetch(
