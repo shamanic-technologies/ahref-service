@@ -37,6 +37,8 @@ const drRow = (domain: string, overrides: Record<string, unknown> = {}) => ({
 interface Call {
   method: string;
   url: string;
+  headers: Record<string, string>;
+  body: unknown;
 }
 let calls: Call[];
 
@@ -63,7 +65,14 @@ beforeEach(() => {
   globalThis.fetch = vi.fn(async (input: unknown, init?: { method?: string }) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
-    calls.push({ method, url });
+    calls.push({
+      method,
+      url,
+      headers: (init as { headers?: Record<string, string> } | undefined)?.headers ?? {},
+      body: (init as { body?: string } | undefined)?.body
+        ? JSON.parse((init as { body: string }).body)
+        : undefined,
+    });
 
     // Apify
     if (url.includes("api.apify.com")) {
@@ -119,6 +128,14 @@ beforeEach(() => {
       }
       return makeRes(201, { costs: [{ id: "cost-1" }] });
     }
+    // runs-service close platform run PATCH
+    if (/\/v1\/platform-runs\/[^/]+$/.test(url) && method === "PATCH") {
+      return makeRes(200, {});
+    }
+    // runs-service create platform run POST
+    if (url.endsWith("/v1/platform-runs") && method === "POST") {
+      return makeRes(201, { id: "platform-run-1" });
+    }
     // runs-service close run PATCH
     if (/\/v1\/runs\/[^/]+$/.test(url) && method === "PATCH") {
       return makeRes(200, {});
@@ -141,6 +158,10 @@ const apifyRunCall = (c: Call) =>
   c.url.includes("api.apify.com") && !c.url.includes("/datasets/");
 const provisionCall = (c: Call) => c.url.endsWith("/costs") && c.method === "POST";
 const authorizeCall = (c: Call) => c.url.includes("customer_balance/authorize");
+const platformRunCreateCall = (c: Call) =>
+  c.url.endsWith("/v1/platform-runs") && c.method === "POST";
+const platformCostCall = (c: Call) =>
+  c.url.includes("/v1/platform-runs/") && c.url.endsWith("/costs") && c.method === "POST";
 
 describe("POST /orgs/domains/dr-compute", () => {
   it("400 when domains is missing", async () => {
@@ -233,5 +254,81 @@ describe("POST /orgs/domains/dr-compute", () => {
     );
     expect(res.status).toBe(502);
     expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+});
+
+describe("POST /internal/domains/dr-compute", () => {
+  it("400 when domains is missing", async () => {
+    const res = await request(app)
+      .post("/internal/domains/dr-compute")
+      .set("x-api-key", API_KEY)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(calls.length).toBe(0);
+  });
+
+  it("400 for an invalid domain before creating a platform run", async () => {
+    const res = await request(app)
+      .post("/internal/domains/dr-compute")
+      .set("x-api-key", API_KEY)
+      .send({ domains: ["not a domain"] });
+
+    expect(res.status).toBe(400);
+    expect(idxOf(platformRunCreateCall)).toBe(-1);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("skips fresh cached domains without platform run, billing, or Apify work", async () => {
+    setMockResult(DR_VIEW, [drRow("example.com")]);
+
+    const res = await request(app)
+      .post("/internal/domains/dr-compute")
+      .set("x-api-key", API_KEY)
+      .send({ domains: ["Example.com", "www.example.com"] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].domain).toBe("example.com");
+    expect(idxOf(platformRunCreateCall)).toBe(-1);
+    expect(idxOf(authorizeCall)).toBe(-1);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("computes stale domains with service auth only and records platform cost", async () => {
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
+
+    const res = await request(app)
+      .post("/internal/domains/dr-compute")
+      .set("x-api-key", API_KEY)
+      .send({ domains: ["example.com"] });
+
+    expect(res.status).toBe(200);
+    expect(idxOf(platformRunCreateCall)).toBeGreaterThanOrEqual(0);
+    expect(idxOf(platformCostCall)).toBeGreaterThanOrEqual(0);
+    expect(idxOf(authorizeCall)).toBe(-1);
+    expect(idxOf(apifyRunCall)).toBeGreaterThanOrEqual(0);
+
+    const platformRunCall = calls.find(platformRunCreateCall);
+    expect(platformRunCall?.headers["x-service-name"]).toBe("ahref-service");
+    expect(platformRunCall?.headers["x-org-id"]).toBeUndefined();
+
+    const costCall = calls.find(platformCostCall);
+    expect(costCall?.body).toEqual({
+      items: [
+        {
+          costName: "apify-ahrefs-result",
+          costSource: "platform",
+          quantity: 1,
+          status: "actual",
+        },
+      ],
+    });
   });
 });
