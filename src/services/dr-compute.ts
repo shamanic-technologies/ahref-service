@@ -6,6 +6,11 @@ import { runDrScrape, type ApifyDrResult } from "./apify";
 import { getPlatformKey, type CallerInfo } from "./key";
 import { authorize } from "./billing";
 import {
+  enqueueDomainMetricJobs,
+  scheduleDomainMetricWorker,
+  type DomainMetricJob,
+} from "./domain-metric-jobs";
+import {
   addCost,
   addPlatformCost,
   closePlatformRun,
@@ -68,10 +73,11 @@ const scrapeAndPersistDr = async (
  * DR is global reference data (not org-scoped), so the persisted rating row
  * carries no org_id — the org attribution lives on the run + cost.
  */
-export const computeDr = async (pool: Pool, domains: string[], ctx: OrgContext) => {
+const executeDrCompute = async (pool: Pool, domains: string[], ctx: OrgContext) => {
   // Normalize + dedupe so www/non-www and casing collapse to one key. Throws on
   // an unusable domain (→ 400 at the route).
   const normalized = [...new Set(domains.map(normalizeDomain))];
+  if (normalized.length === 0) return;
 
   const runId = await createChildRun("dr-compute", ctx);
   let provisionCostId: string | null = null;
@@ -116,9 +122,6 @@ export const computeDr = async (pool: Pool, domains: string[], ctx: OrgContext) 
     await setCostStatus(runId, provisionCostId, "cancelled", ctx);
 
     await closeRun(runId, "completed", ctx);
-
-    // Read the freshly-persisted DR back from the cache for the response.
-    return await getDrStatus(pool, normalized);
   } catch (err) {
     // Cleanup is best-effort; the original error is what fails the request loud.
     if (provisionCostId) {
@@ -138,6 +141,45 @@ export const computeDr = async (pool: Pool, domains: string[], ctx: OrgContext) 
     }
     throw err;
   }
+};
+
+const processOrgDrJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
+  if (jobs.length === 0) return;
+
+  const domains = [...new Set(jobs.map((job) => job.domain))];
+  const before = await getDrStatus(pool, domains);
+  const domainsToScrape = [
+    ...new Set(before.filter((status) => status.needsUpdate).map((status) => status.domain)),
+  ];
+  if (domainsToScrape.length === 0) return;
+
+  const first = jobs[0];
+  await executeDrCompute(pool, domainsToScrape, {
+    orgId: first.orgId,
+    userId: first.userId,
+    runId: first.parentRunId,
+  });
+};
+
+/**
+ * Request a DR refresh without holding the HTTP caller open for Apify. The
+ * response remains the existing DR status shape; missing/stale domains are
+ * queued and later become visible through the same read surfaces after the
+ * background worker persists them.
+ */
+export const computeDr = async (pool: Pool, domains: string[], ctx: OrgContext) => {
+  const normalized = [...new Set(domains.map(normalizeDomain))];
+  const before = await getDrStatus(pool, normalized);
+  const domainsToQueue = [
+    ...new Set(before.filter((status) => status.needsUpdate).map((status) => status.domain)),
+  ];
+
+  if (domainsToQueue.length > 0) {
+    await enqueueDomainMetricJobs(pool, "dr", domainsToQueue, ctx);
+    scheduleDomainMetricWorker(pool, "dr", ctx.orgId, (jobs) => processOrgDrJobs(pool, jobs));
+  }
+
+  return before;
 };
 
 /**

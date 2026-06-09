@@ -183,6 +183,32 @@ SELECT DISTINCT ON (domain)
   top_keywords
 FROM domain_traffic_snapshot
 ORDER BY domain, data_captured_at DESC;
+
+-- Fire-and-forget compute queue. One active job per org/domain/metric prevents
+-- repeated dashboard clicks from fanning out duplicate Apify runs.
+CREATE TABLE IF NOT EXISTS domain_metric_compute_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL,
+  user_id UUID,
+  parent_run_id UUID,
+  metric TEXT NOT NULL CHECK (metric IN ('dr', 'traffic')),
+  domain TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (org_id, metric, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_metric_compute_jobs_pending
+  ON domain_metric_compute_jobs(metric, org_id, requested_at)
+  WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_domain_metric_compute_jobs_running
+  ON domain_metric_compute_jobs(metric, org_id, started_at)
+  WHERE status = 'running';
 `;
 
 /**

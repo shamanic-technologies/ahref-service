@@ -11,7 +11,12 @@ process.env.KEY_SERVICE_URL = "http://key.test";
 process.env.KEY_SERVICE_API_KEY = "key-key";
 
 import { createApp } from "../src/app";
-import { setMockResult, clearMocks } from "./setup";
+import { setMockResult, clearMocks, getMetricJobs } from "./setup";
+import {
+  resetDomainMetricWorkersForTest,
+  setDomainMetricWorkerAutoStartForTest,
+  waitForDomainMetricWorkersForTest,
+} from "../src/services/domain-metric-jobs";
 
 const API_KEY = "test-api-key";
 const app = createApp({ apiKey: API_KEY });
@@ -46,7 +51,7 @@ interface Overrides {
   authorizeSufficient?: boolean;
   provisionStatus?: number;
   keyStatus?: number;
-  apifyRunStatus?: string;
+  apifyRunStatus?: string | (() => string);
 }
 let overrides: Overrides;
 
@@ -93,7 +98,10 @@ beforeEach(() => {
       return makeRes(201, {
         data: {
           id: "apify-run-1",
-          status: overrides.apifyRunStatus ?? "SUCCEEDED",
+          status:
+            typeof overrides.apifyRunStatus === "function"
+              ? overrides.apifyRunStatus()
+              : overrides.apifyRunStatus ?? "SUCCEEDED",
           defaultDatasetId: "ds-1",
           chargedEventCounts: { "apify-default-dataset-item": 1 },
         },
@@ -150,6 +158,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetDomainMetricWorkersForTest();
   vi.restoreAllMocks();
 });
 
@@ -179,7 +188,7 @@ describe("POST /orgs/domains/dr-compute", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("happy path: scrapes, persists, returns DR", async () => {
+  it("returns fresh cached DR without queuing vendor work", async () => {
     setMockResult(DR_VIEW, [drRow("example.com")]);
 
     const res = await withOrg(
@@ -190,6 +199,90 @@ describe("POST /orgs/domains/dr-compute", () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0].domain).toBe("example.com");
     expect(res.body[0].latestValidDr).toBe(45);
+    expect(getMetricJobs()).toHaveLength(0);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("queues missing DR and returns promptly with the current read shape", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+
+    const res = await withOrg(
+      request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        domain: "example.com",
+        drToUpdate: true,
+        drUpdateReason: "No DR fetched yet",
+        drLatestSearchDate: null,
+        latestValidDr: null,
+        latestValidDrDate: null,
+        needsUpdate: true,
+      },
+    ]);
+    expect(getMetricJobs()).toHaveLength(1);
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("returns promptly without entering Apify when the underlying run would exceed the old 180s wait window", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
+    overrides.apifyRunStatus = "RUNNING";
+
+    const res = await withOrg(
+      request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].needsUpdate).toBe(true);
+    expect(getMetricJobs()[0].status).toBe("pending");
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("coalesces repeated missing DR requests for the same org/domain", async () => {
+    setDomainMetricWorkerAutoStartForTest(false);
+
+    await withOrg(
+      request(app).post("/orgs/domains/dr-compute").send({ domains: ["Example.com"] })
+    );
+    await withOrg(
+      request(app).post("/orgs/domains/dr-compute").send({ domains: ["www.example.com"] })
+    );
+
+    expect(getMetricJobs()).toHaveLength(1);
+    expect(getMetricJobs()[0]).toMatchObject({
+      org_id: ORG_ID,
+      metric: "dr",
+      domain: "example.com",
+      status: "pending",
+    });
+    expect(idxOf(apifyRunCall)).toBe(-1);
+  });
+
+  it("background worker scrapes, persists, and records cost in order", async () => {
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
+
+    const res = await withOrg(
+      request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
+    );
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("succeeded");
 
     // Full cost lifecycle ran: create run, provision (POST costs), authorize,
     // key decrypt, apify run + dataset, actual (POST costs), cancel hold (PATCH
@@ -202,11 +295,18 @@ describe("POST /orgs/domains/dr-compute", () => {
     expect(idxOf((c) => /\/v1\/runs\/[^/]+$/.test(c.url) && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
   });
 
-  it("declares cost in order: PROVISION → AUTHORIZE → EXECUTE(apify)", async () => {
-    setMockResult(DR_VIEW, [drRow("example.com")]);
+  it("declares background cost in order: PROVISION → AUTHORIZE → EXECUTE(apify)", async () => {
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
     await withOrg(
       request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
     );
+    await waitForDomainMetricWorkersForTest();
     const provisionIdx = idxOf(provisionCall);
     const authorizeIdx = idxOf(authorizeCall);
     const apifyIdx = idxOf(apifyRunCall);
@@ -215,44 +315,96 @@ describe("POST /orgs/domains/dr-compute", () => {
     expect(authorizeIdx).toBeLessThan(apifyIdx);
   });
 
-  it("502 when authorize is insufficient — no Apify call, hold cancelled", async () => {
+  it("does not fail the caller when background authorize is insufficient", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
     overrides.authorizeSufficient = false;
+
     const res = await withOrg(
       request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf(apifyRunCall)).toBe(-1);
     // provisioned hold cancelled + run closed failed
     expect(idxOf((c) => c.url.includes("/costs/") && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
     expect(idxOf((c) => /\/v1\/runs\/[^/]+$/.test(c.url) && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
   });
 
-  it("502 when provision fails (422 unknown cost) — no authorize, no Apify", async () => {
+  it("does not fail the caller when background provision fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
     overrides.provisionStatus = 422;
+
     const res = await withOrg(
       request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf(authorizeCall)).toBe(-1);
     expect(idxOf(apifyRunCall)).toBe(-1);
   });
 
-  it("502 when the Apify run fails — hold cancelled, run closed failed", async () => {
+  it("does not fail the caller when the background Apify run fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
     overrides.apifyRunStatus = "FAILED";
+
     const res = await withOrg(
       request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf((c) => c.url.includes("/costs/") && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
     expect(idxOf((c) => /\/v1\/runs\/[^/]+$/.test(c.url) && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
   });
 
-  it("502 when the platform Apify key is missing (404) — no Apify run", async () => {
+  it("does not fail the caller when the platform Apify key is missing", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setMockResult(DR_VIEW, [
+      drRow("example.com", {
+        dr_to_update: true,
+        dr_update_reason: "DR outdated",
+        needs_update: true,
+      }),
+    ]);
     overrides.keyStatus = 404;
+
     const res = await withOrg(
       request(app).post("/orgs/domains/dr-compute").send({ domains: ["example.com"] })
     );
-    expect(res.status).toBe(502);
+    await waitForDomainMetricWorkersForTest();
+
+    expect(res.status).toBe(200);
+    expect(getMetricJobs()[0].status).toBe("failed");
+    expect(errorSpy).toHaveBeenCalled();
     expect(idxOf(apifyRunCall)).toBe(-1);
   });
 });
