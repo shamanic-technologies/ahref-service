@@ -8,6 +8,8 @@ export interface DomainMetricJob {
   orgId: string;
   userId?: string;
   parentRunId?: string;
+  /** Audience attribution carried across the async boundary (campaign flow). */
+  audienceId?: string;
   metric: DomainMetric;
   domain: string;
 }
@@ -24,6 +26,7 @@ const mapJobRow = (row: Record<string, unknown>): DomainMetricJob => ({
   orgId: row.org_id as string,
   userId: (row.user_id as string | null) ?? undefined,
   parentRunId: (row.parent_run_id as string | null) ?? undefined,
+  audienceId: (row.audience_id as string | null) ?? undefined,
   metric: row.metric as DomainMetric,
   domain: row.domain as string,
 });
@@ -38,22 +41,23 @@ export const enqueueDomainMetricJobs = async (
 
   const result = await pool.query(
     `INSERT INTO domain_metric_compute_jobs (
-      metric, domain, status, org_id, user_id, parent_run_id, requested_at, updated_at
+      metric, domain, status, org_id, user_id, parent_run_id, audience_id, requested_at, updated_at
     )
-    SELECT $1::text, unnest($2::text[]), 'pending', $3::uuid, $4::uuid, $5::uuid,
+    SELECT $1::text, unnest($2::text[]), 'pending', $3::uuid, $4::uuid, $5::uuid, $6::uuid,
       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     ON CONFLICT (org_id, metric, domain) DO UPDATE SET
       status = 'pending',
       user_id = EXCLUDED.user_id,
       parent_run_id = EXCLUDED.parent_run_id,
+      audience_id = EXCLUDED.audience_id,
       requested_at = CURRENT_TIMESTAMP,
       started_at = NULL,
       finished_at = NULL,
       last_error = NULL,
       updated_at = CURRENT_TIMESTAMP
     WHERE domain_metric_compute_jobs.status NOT IN ('pending', 'running')
-    RETURNING id, org_id, user_id, parent_run_id, metric, domain`,
-    [metric, domains, ctx.orgId, ctx.userId ?? null, ctx.runId ?? null]
+    RETURNING id, org_id, user_id, parent_run_id, audience_id, metric, domain`,
+    [metric, domains, ctx.orgId, ctx.userId ?? null, ctx.runId ?? null, ctx.audienceId ?? null]
   );
 
   return result.rows.map(mapJobRow);
@@ -85,7 +89,7 @@ const claimPendingDomainMetricJobs = async (
       updated_at = CURRENT_TIMESTAMP
     FROM claimed
     WHERE jobs.id = claimed.id
-    RETURNING jobs.id, jobs.org_id, jobs.user_id, jobs.parent_run_id, jobs.metric, jobs.domain`,
+    RETURNING jobs.id, jobs.org_id, jobs.user_id, jobs.parent_run_id, jobs.audience_id, jobs.metric, jobs.domain`,
     [metric, orgId, limit]
   );
 

@@ -10,6 +10,13 @@ export interface OrgContext {
   orgId: string;
   userId?: string;
   runId?: string;
+  /**
+   * Audience attribution ID (human-service org-scoped saved filter-set,
+   * audience.id). Present only inside a campaign flow — workflow-service sends
+   * x-audience-id on node calls. Absent otherwise; forwarded downstream so
+   * runs-service tags the run/cost for per-audience cost attribution.
+   */
+  audienceId?: string;
 }
 
 declare global {
@@ -41,6 +48,7 @@ export const requireOrgId = (
     orgId,
     userId: (req.headers["x-user-id"] as string | undefined) || undefined,
     runId: (req.headers["x-run-id"] as string | undefined) || undefined,
+    audienceId: (req.headers["x-audience-id"] as string | undefined) || undefined,
   };
   next();
 };

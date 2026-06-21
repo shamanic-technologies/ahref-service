@@ -25,6 +25,13 @@ const orgHeaders = z.object({
   "x-org-id": z.string().uuid().describe("Org UUID from client-service (required)"),
   "x-user-id": z.string().uuid().optional().describe("User UUID from client-service"),
   "x-run-id": z.string().uuid().optional().describe("Caller's run ID from runs-service"),
+  "x-audience-id": z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+    ),
 });
 
 // Register schemas

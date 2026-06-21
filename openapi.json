@@ -566,6 +566,17 @@
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -625,6 +636,17 @@
             "required": false,
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
             "in": "header"
           }
         ],
@@ -705,6 +727,17 @@
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -764,6 +797,17 @@
             "required": false,
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
             "in": "header"
           }
         ],
@@ -844,6 +888,17 @@
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -901,6 +956,17 @@
             "required": false,
             "description": "Caller's run ID from runs-service",
             "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Audience attribution ID (campaign flow only). Forwarded downstream so runs-service tags the run/cost for per-audience cost attribution.",
+            "name": "x-audience-id",
             "in": "header"
           }
         ],
