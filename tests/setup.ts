@@ -18,6 +18,7 @@ const mockPool = {
       const orgId = values?.[2] as string;
       const userId = (values?.[3] as string | null) ?? null;
       const parentRunId = (values?.[4] as string | null) ?? null;
+      const audienceId = (values?.[5] as string | null) ?? null;
       const rows: Record<string, unknown>[] = [];
 
       for (const domain of domains) {
@@ -31,6 +32,7 @@ const mockPool = {
           org_id: orgId,
           user_id: userId,
           parent_run_id: parentRunId,
+          audience_id: audienceId,
           metric,
           domain,
           status: "pending",

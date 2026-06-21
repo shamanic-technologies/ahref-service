@@ -158,6 +158,7 @@ const processOrgDrJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
     orgId: first.orgId,
     userId: first.userId,
     runId: first.parentRunId,
+    audienceId: first.audienceId,
   });
 };
 

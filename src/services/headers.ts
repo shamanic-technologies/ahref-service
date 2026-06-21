@@ -22,5 +22,10 @@ export function buildServiceHeaders(
   };
   if (ctx.userId) headers["x-user-id"] = ctx.userId;
   if (runId) headers["x-run-id"] = runId;
+  // Forward audience attribution so runs-service tags the run (and, by
+  // COALESCE inheritance, its cost rows) for per-audience cost attribution.
+  // Only reaches internal services that use this builder — vendor calls
+  // (Ahrefs, Apify) build headers inline, so no internal-header egress leak.
+  if (ctx.audienceId) headers["x-audience-id"] = ctx.audienceId;
   return headers;
 }

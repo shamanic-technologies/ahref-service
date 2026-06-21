@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS domain_metric_compute_jobs (
   org_id UUID NOT NULL,
   user_id UUID,
   parent_run_id UUID,
+  audience_id UUID,
   metric TEXT NOT NULL CHECK (metric IN ('dr', 'traffic')),
   domain TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
@@ -203,6 +204,9 @@ CREATE TABLE IF NOT EXISTS domain_metric_compute_jobs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (org_id, metric, domain)
 );
+-- Audience attribution carried across the async boundary so the background
+-- worker can tag its runs-service run/cost for per-audience cost attribution.
+ALTER TABLE domain_metric_compute_jobs ADD COLUMN IF NOT EXISTS audience_id UUID;
 CREATE INDEX IF NOT EXISTS idx_domain_metric_compute_jobs_pending
   ON domain_metric_compute_jobs(metric, org_id, requested_at)
   WHERE status = 'pending';
