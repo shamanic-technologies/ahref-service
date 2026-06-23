@@ -40,6 +40,16 @@ let batchTimeoutMs = BATCH_TIMEOUT_MS;
 const REAPER_INTERVAL_MS = 60_000;
 let reaperIntervalMs = REAPER_INTERVAL_MS;
 
+/** Domains claimed per scrape batch. The Apify actor's wall-clock is ~constant
+ * vs domain count (warmup dominates), so a bigger batch is near-free throughput. */
+const BATCH_SIZE = 100;
+let batchSize = BATCH_SIZE;
+/** Parallel scrape loops per (org, metric). The bottleneck is serialization,
+ * not batch size — N concurrent loops fan out N parallel Apify runs. Bounded
+ * per-org to keep total Apify concurrency sane across orgs. */
+const WORKER_CONCURRENCY = 4;
+let workerConcurrency = WORKER_CONCURRENCY;
+
 /** Processor registry, keyed by metric, populated by the enqueue paths and at
  * boot. The reaper uses it to kick workers for reclaimed / orphaned pending
  * jobs without importing the per-metric compute modules (avoids a cycle). */
@@ -173,14 +183,14 @@ const markDomainMetricJobsFailed = async (
   );
 };
 
-export const processDomainMetricJobs = async (
+const runClaimLoop = async (
   pool: Pool,
   metric: DomainMetric,
   orgId: string,
   processor: DomainMetricProcessor
 ): Promise<void> => {
   while (true) {
-    const jobs = await claimPendingDomainMetricJobs(pool, metric, orgId, 50);
+    const jobs = await claimPendingDomainMetricJobs(pool, metric, orgId, batchSize);
     if (jobs.length === 0) return;
 
     const jobIds = jobs.map((job) => job.id);
@@ -197,6 +207,28 @@ export const processDomainMetricJobs = async (
       await markDomainMetricJobsFailed(pool, jobIds, error);
     }
   }
+};
+
+/**
+ * Drain the pending queue for one (metric, org) with bounded parallelism. The
+ * scrape wall-clock is ~constant regardless of batch size (Apify actor warmup
+ * dominates), so throughput is gated by how many scrape batches run AT ONCE —
+ * a single serial loop leaves later jobs waiting minutes in `pending`. Running
+ * WORKER_CONCURRENCY claim-loops concurrently fans out that many parallel Apify
+ * runs; `FOR UPDATE SKIP LOCKED` in the claim guarantees no two loops grab the
+ * same job. Resolves once every loop sees an empty queue.
+ */
+export const processDomainMetricJobs = async (
+  pool: Pool,
+  metric: DomainMetric,
+  orgId: string,
+  processor: DomainMetricProcessor
+): Promise<void> => {
+  await Promise.all(
+    Array.from({ length: workerConcurrency }, () =>
+      runClaimLoop(pool, metric, orgId, processor)
+    )
+  );
 };
 
 export const scheduleDomainMetricWorker = (
@@ -387,6 +419,14 @@ export const setDomainMetricStaleRunningMsForTest = (ms: number): void => {
   staleRunningMs = ms;
 };
 
+export const setDomainMetricBatchSizeForTest = (n: number): void => {
+  batchSize = n;
+};
+
+export const setDomainMetricConcurrencyForTest = (n: number): void => {
+  workerConcurrency = n;
+};
+
 export const resetDomainMetricWorkersForTest = (): void => {
   activeWorkers.clear();
   autoStartWorkers = true;
@@ -395,4 +435,6 @@ export const resetDomainMetricWorkersForTest = (): void => {
   batchTimeoutMs = BATCH_TIMEOUT_MS;
   staleRunningMs = STALE_RUNNING_MS;
   reaperIntervalMs = REAPER_INTERVAL_MS;
+  batchSize = BATCH_SIZE;
+  workerConcurrency = WORKER_CONCURRENCY;
 };

@@ -67,7 +67,9 @@ export const getPool = (): Pool => {
         connectionTimeoutMillis: 10_000,
         idleTimeoutMillis: 30_000,
         keepAlive: true,
-        max: 10,
+        // Headroom for parallel scrape loops (WORKER_CONCURRENCY per active
+        // org/metric) + the reaper, each running its own claim/persist/mark.
+        max: 20,
       })
     );
   }
