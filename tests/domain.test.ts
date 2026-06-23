@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { normalizeDomain } from "../src/lib/domain";
+import {
+  normalizeDomain,
+  normalizeDomainsSkippingInvalid,
+} from "../src/lib/domain";
 
 describe("normalizeDomain", () => {
   it("strips a leading www (the www exception)", () => {
@@ -67,5 +70,34 @@ describe("normalizeDomain", () => {
     expect(() => normalizeDomain("https://")).toThrow();
     expect(() => normalizeDomain("not a domain")).toThrow();
     expect(() => normalizeDomain("localhost")).toThrow();
+  });
+});
+
+describe("normalizeDomainsSkippingInvalid", () => {
+  it("drops invalid entries and keeps the valid, deduped rest", () => {
+    const { domains, skipped } = normalizeDomainsSkippingInvalid([
+      "-",
+      "www.example.com",
+      "example.com",
+      "blog.example.com",
+      "not a domain",
+    ]);
+    expect(domains).toEqual(["example.com", "blog.example.com"]);
+    expect(skipped).toEqual(["-", "not a domain"]);
+  });
+
+  it("returns no domains when every input is invalid", () => {
+    const { domains, skipped } = normalizeDomainsSkippingInvalid(["-", ""]);
+    expect(domains).toEqual([]);
+    expect(skipped).toEqual(["-", ""]);
+  });
+
+  it("returns all domains when every input is valid", () => {
+    const { domains, skipped } = normalizeDomainsSkippingInvalid([
+      "a16z.com",
+      "abc.net.au",
+    ]);
+    expect(domains).toEqual(["a16z.com", "abc.net.au"]);
+    expect(skipped).toEqual([]);
   });
 });
