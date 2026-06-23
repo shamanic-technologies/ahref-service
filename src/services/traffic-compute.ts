@@ -1,7 +1,11 @@
 import { Pool } from "pg";
 import type { OrgContext } from "../middleware/org-context";
 import { normalizeDomain } from "../lib/domain";
-import { getTrafficHistory, updateDomainRating } from "./ahref";
+import {
+  getTrafficHistory,
+  updateDomainRating,
+  IMPLAUSIBLE_RESCRAPE_COOLDOWN_MS,
+} from "./ahref";
 import { runTrafficScrape, type ApifyTrafficResult } from "./apify";
 import { getPlatformKey } from "./key";
 import { authorize } from "./billing";
@@ -128,15 +132,30 @@ const executeTrafficCompute = async (
   }
 };
 
+/**
+ * A domain needs a (re)scrape when it has no trustworthy data: never scraped, or
+ * its latest scrape was invalidated as implausible AND the cooldown has elapsed.
+ * The cooldown stops an implausible result (e.g. a genuine high-DR/low-traffic
+ * edge case) from re-scraping — and re-billing — on every request.
+ */
+type TrafficStatus = Awaited<ReturnType<typeof getTrafficHistory>>[number];
+const needsTrafficScrape = (status: TrafficStatus): boolean => {
+  if (status.hasData) return false;
+  if (!status.trafficImplausible) return true; // never scraped
+  if (!status.latestDataCapturedAt) return true;
+  return (
+    Date.now() - Date.parse(status.latestDataCapturedAt) >
+    IMPLAUSIBLE_RESCRAPE_COOLDOWN_MS
+  );
+};
+
 const processOrgTrafficJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
   if (jobs.length === 0) return;
 
   const domains = [...new Set(jobs.map((job) => job.domain))];
   const before = await getTrafficHistory(pool, domains);
   const domainsToScrape = [
-    ...new Set(
-      before.filter((status) => !status.hasData).map((status) => status.domain)
-    ),
+    ...new Set(before.filter(needsTrafficScrape).map((status) => status.domain)),
   ];
   if (domainsToScrape.length === 0) return;
 
@@ -163,7 +182,7 @@ export const computeTraffic = async (
   const normalized = [...new Set(domains.map(normalizeDomain))];
   const before = await getTrafficHistory(pool, normalized);
   const domainsToQueue = [
-    ...new Set(before.filter((status) => !status.hasData).map((status) => status.domain)),
+    ...new Set(before.filter(needsTrafficScrape).map((status) => status.domain)),
   ];
 
   if (domainsToQueue.length > 0) {

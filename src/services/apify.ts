@@ -192,10 +192,16 @@ export const runTrafficScrape = async (
   token: string,
   domains: string[]
 ): Promise<ApifyTrafficRun> => {
+  // `mode:"subdomains"` (the actor's own default) rolls the apex up with `www.`
+  // and every other subdomain. `mode:"domain"` scopes to the EXACT host, so a
+  // www-canonical site (wsj.com → www.wsj.com, ft.com → www.ft.com) scraped at
+  // the www-stripped apex returns only the few pages served on the bare apex
+  // (mostly /subscribe redirects) → a tiny, wrong organic estimate. Subdomain
+  // rollup is the correct scope for "the domain's global organic traffic".
   const { items, chargedResults } = await runActorScrape(token, {
     searchType: "traffic_overview",
     urls: domains,
-    mode: "domain",
+    mode: "subdomains",
   });
 
   const results: ApifyTrafficResult[] = items.map((it) => ({
