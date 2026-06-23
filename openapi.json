@@ -289,6 +289,15 @@
             "items": {
               "$ref": "#/components/schemas/TrafficMonthly"
             }
+          },
+          "trafficImplausible": {
+            "type": "boolean",
+            "description": "True when the latest scrape was rejected as partial/wrong-scope (a tiny, untrustworthy figure). The value fields are nulled and the series emptied; the domain is re-scraped on a later request."
+          },
+          "trafficImplausibleReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why the latest scrape was rejected, or null when trustworthy."
           }
         },
         "required": [
@@ -297,7 +306,9 @@
           "latestDataCapturedAt",
           "trafficMonthlyAvg",
           "trafficValueMonthlyAvg",
-          "monthlyOrganicTraffic"
+          "monthlyOrganicTraffic",
+          "trafficImplausible",
+          "trafficImplausibleReason"
         ]
       },
       "AiVisibilityBody": {

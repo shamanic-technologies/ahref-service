@@ -2,6 +2,10 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { updateDomainRatingBodySchema } from "../schemas/apify-ahref";
 import { normalizeDomain } from "../lib/domain";
+import { assessTrafficPlausibility } from "../lib/traffic-plausibility";
+
+/** Retry-eligibility cooldown for an implausible (invalidated) traffic snapshot. */
+export const IMPLAUSIBLE_RESCRAPE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 type UpdateDomainRatingBody = z.infer<typeof updateDomainRatingBodySchema>;
 
@@ -163,24 +167,52 @@ interface TrafficSilverInput {
   topKeywords: unknown;
 }
 
+/** Latest known Ahrefs Domain Rating for a domain (authority cross-signal). */
+const getLatestDomainRating = async (
+  pool: Pool,
+  domain: string
+): Promise<number | null> => {
+  const result = await pool.query(
+    `SELECT authority_domain_rating
+     FROM apify_ahref
+     WHERE domain = $1 AND data_type = 'authority'
+       AND authority_domain_rating IS NOT NULL
+     ORDER BY data_captured_at DESC
+     LIMIT 1`,
+    [domain]
+  );
+  return (result.rows[0]?.authority_domain_rating as number | null) ?? null;
+};
+
 /**
  * Deterministically project a traffic bronze row into the silver layer
  * (no LLM — structured JSON). Two upserts, both idempotent:
  *  - `domain_traffic_snapshot`: the rich current values for this scrape
- *    (deduped on the capture timestamp).
+ *    (deduped on the capture timestamp). Tagged with a plausibility verdict so a
+ *    partial / wrong-scope scrape (tiny confident number) is invalidated, not
+ *    surfaced as success — see `assessTrafficPlausibility`.
  *  - `domain_traffic_monthly`: one row per (domain, month) exploded from
  *    `trafficHistory`, last-write-wins by the bronze `data_captured_at` so an
- *    older scrape never clobbers a month a newer scrape already wrote.
+ *    older scrape never clobbers a month a newer scrape already wrote. SKIPPED
+ *    for an implausible scrape (its months are wrong-scoped too).
  */
 export const promoteTrafficSilver = async (
   pool: Pool,
   input: TrafficSilverInput
 ): Promise<void> => {
+  const authorityDomainRating = await getLatestDomainRating(pool, input.domain);
+  const { implausible, reason } = assessTrafficPlausibility({
+    trafficMonthlyAvg: input.trafficMonthlyAvg,
+    topPages: input.topPages,
+    authorityDomainRating,
+  });
+
   await pool.query(
     `INSERT INTO domain_traffic_snapshot (
       domain, data_captured_at, traffic_monthly_avg, traffic_value_monthly_avg,
-      top_pages, top_countries, top_keywords, source_bronze_id
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      top_pages, top_countries, top_keywords, source_bronze_id,
+      traffic_implausible, traffic_implausible_reason
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     ON CONFLICT (domain, data_captured_at) DO UPDATE SET
       traffic_monthly_avg = EXCLUDED.traffic_monthly_avg,
       traffic_value_monthly_avg = EXCLUDED.traffic_value_monthly_avg,
@@ -188,6 +220,8 @@ export const promoteTrafficSilver = async (
       top_countries = EXCLUDED.top_countries,
       top_keywords = EXCLUDED.top_keywords,
       source_bronze_id = EXCLUDED.source_bronze_id,
+      traffic_implausible = EXCLUDED.traffic_implausible,
+      traffic_implausible_reason = EXCLUDED.traffic_implausible_reason,
       last_rebuilt_at = CURRENT_TIMESTAMP`,
     [
       input.domain,
@@ -198,8 +232,14 @@ export const promoteTrafficSilver = async (
       input.topCountries != null ? JSON.stringify(input.topCountries) : null,
       input.topKeywords != null ? JSON.stringify(input.topKeywords) : null,
       input.bronzeId,
+      implausible,
+      reason,
     ]
   );
+
+  // An implausible scrape's monthly series is wrong-scoped too — do not promote
+  // it into silver. The bronze row keeps the full payload for audit.
+  if (implausible) return;
 
   const history = Array.isArray(input.trafficHistory)
     ? (input.trafficHistory as Array<{ date?: unknown; organic?: unknown }>)
@@ -247,7 +287,8 @@ export const getTrafficHistory = async (pool: Pool, domains: string[]) => {
 
   const latest = await pool.query(
     `SELECT domain, data_captured_at, traffic_monthly_avg, traffic_value_monthly_avg,
-            top_pages, top_countries, top_keywords
+            top_pages, top_countries, top_keywords,
+            traffic_implausible, traffic_implausible_reason
      FROM v_domain_traffic_latest
      WHERE domain = ANY(ARRAY[${placeholders}]::text[])`,
     domains
@@ -280,17 +321,30 @@ export const getTrafficHistory = async (pool: Pool, domains: string[]) => {
   return domains.map((domain) => {
     const snap = latestByDomain.get(domain);
     const series = monthlyByDomain.get(domain) ?? [];
+    // An implausible (invalidated) latest snapshot is NOT trustworthy: surface
+    // it as an explicit "no reliable data" signal (null value + empty series +
+    // hasData:false) so the consumer never shows a silently-wrong tiny number,
+    // and so the worker re-scrapes it (after a cooldown). The flag + reason are
+    // exposed so a caller can distinguish "never scraped" from "scrape rejected".
+    const implausible = Boolean(snap?.traffic_implausible);
     return {
       domain,
-      hasData: Boolean(snap) || series.length > 0,
+      hasData: implausible ? false : Boolean(snap) || series.length > 0,
       latestDataCapturedAt: toIsoOrNull(snap?.data_captured_at),
-      trafficMonthlyAvg: (snap?.traffic_monthly_avg as number | null) ?? null,
-      trafficValueMonthlyAvg:
-        (snap?.traffic_value_monthly_avg as number | null) ?? null,
-      topPages: snap?.top_pages ?? null,
-      topCountries: snap?.top_countries ?? null,
-      topKeywords: snap?.top_keywords ?? null,
-      monthlyOrganicTraffic: series,
+      trafficMonthlyAvg: implausible
+        ? null
+        : (snap?.traffic_monthly_avg as number | null) ?? null,
+      trafficValueMonthlyAvg: implausible
+        ? null
+        : (snap?.traffic_value_monthly_avg as number | null) ?? null,
+      topPages: implausible ? null : snap?.top_pages ?? null,
+      topCountries: implausible ? null : snap?.top_countries ?? null,
+      topKeywords: implausible ? null : snap?.top_keywords ?? null,
+      monthlyOrganicTraffic: implausible ? [] : series,
+      trafficImplausible: implausible,
+      trafficImplausibleReason: implausible
+        ? (snap?.traffic_implausible_reason as string | null) ?? null
+        : null,
     };
   });
 };

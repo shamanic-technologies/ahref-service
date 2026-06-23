@@ -200,6 +200,8 @@ describe("POST /orgs/domains/traffic-compute", () => {
         topCountries: null,
         topKeywords: null,
         monthlyOrganicTraffic: [],
+        trafficImplausible: false,
+        trafficImplausibleReason: null,
       },
     ]);
     expect(getMetricJobs()).toHaveLength(1);
@@ -249,9 +251,11 @@ describe("POST /orgs/domains/traffic-compute", () => {
     expect(res.status).toBe(200);
     expect(getMetricJobs()[0].status).toBe("succeeded");
 
-    // The actor was driven with the traffic_overview search type.
+    // The actor was driven with the traffic_overview search type, scoped to
+    // SUBDOMAINS so a www-canonical apex (wsj.com→www.wsj.com) is captured.
     const apifyRun = calls.find(apifyRunCall);
     expect((apifyRun!.body as { searchType: string }).searchType).toBe("traffic_overview");
+    expect((apifyRun!.body as { mode: string }).mode).toBe("subdomains");
 
     // Full cost lifecycle ran.
     expect(idxOf((c) => c.url.endsWith("/v1/runs") && c.method === "POST")).toBeGreaterThanOrEqual(0);
@@ -359,6 +363,95 @@ describe("POST /internal/domains/domain-rating (traffic → silver promotion)", 
   });
 });
 
+describe("traffic plausibility guard (silver promotion)", () => {
+  beforeEach(() => clearMocks());
+
+  const DR_QUERY_KEY = "authority_domain_rating IS NOT NULL";
+  const snapshotInsertCall = () =>
+    getMockPool().query.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("INSERT INTO domain_traffic_snapshot")
+    );
+  const monthlyInserts = () =>
+    queryTexts().filter((t) => t.includes("INSERT INTO domain_traffic_monthly"));
+
+  it("flags a positive figure with no ranking-page evidence and skips the monthly series", async () => {
+    const res = await internal(
+      request(app)
+        .post("/internal/domains/domain-rating")
+        .send({
+          domain: "ft.com",
+          dataType: "traffic",
+          dataCapturedAt: "2026-06-09T00:00:00Z",
+          rawData: { searchType: "traffic_overview" },
+          trafficMonthlyAvg: 196,
+          costMonthlyAvg: 4710,
+          trafficHistory: TRAFFIC_HISTORY,
+          trafficTopPages: [],
+        })
+    );
+    expect(res.status).toBe(201);
+
+    const insert = snapshotInsertCall();
+    const values = insert![1] as unknown[];
+    expect(values[8]).toBe(true); // traffic_implausible
+    expect(String(values[9])).toContain("no ranking-page evidence");
+    // Wrong-scope months are NOT promoted into silver.
+    expect(monthlyInserts()).toHaveLength(0);
+  });
+
+  it("flags organic traffic incoherent with a high domain authority (DR cross-check)", async () => {
+    // wsj.com signature: DR 92 but only 4,802 monthly organic, with non-empty
+    // top pages (so only the authority rule can catch it).
+    setMockResult(DR_QUERY_KEY, [{ authority_domain_rating: 92 }]);
+
+    const res = await internal(
+      request(app)
+        .post("/internal/domains/domain-rating")
+        .send({
+          domain: "wsj.com",
+          dataType: "traffic",
+          dataCapturedAt: "2026-06-09T00:00:00Z",
+          rawData: { searchType: "traffic_overview" },
+          trafficMonthlyAvg: 4802,
+          costMonthlyAvg: 921818,
+          trafficHistory: TRAFFIC_HISTORY,
+          trafficTopPages: [{ url: "https://wsj.com/subscribe", traffic: 4174, share: 91.4 }],
+        })
+    );
+    expect(res.status).toBe(201);
+
+    const values = snapshotInsertCall()![1] as unknown[];
+    expect(values[8]).toBe(true);
+    expect(String(values[9])).toContain("DR 92");
+    expect(monthlyInserts()).toHaveLength(0);
+  });
+
+  it("stores a real high-traffic scrape as plausible (DR known, traffic coherent)", async () => {
+    setMockResult(DR_QUERY_KEY, [{ authority_domain_rating: 93 }]);
+
+    const res = await internal(
+      request(app)
+        .post("/internal/domains/domain-rating")
+        .send({
+          domain: "edition.cnn.com",
+          dataType: "traffic",
+          dataCapturedAt: "2026-06-09T00:00:00Z",
+          rawData: { searchType: "traffic_overview" },
+          trafficMonthlyAvg: 3289936,
+          costMonthlyAvg: 69835384,
+          trafficHistory: TRAFFIC_HISTORY,
+          trafficTopPages: [{ url: "https://edition.cnn.com/", traffic: 8035, share: 1.8 }],
+        })
+    );
+    expect(res.status).toBe(201);
+
+    const values = snapshotInsertCall()![1] as unknown[];
+    expect(values[8]).toBe(false);
+    expect(values[9]).toBeNull();
+    expect(monthlyInserts()).toHaveLength(2);
+  });
+});
+
 describe("GET /orgs/domains/traffic-history", () => {
   beforeEach(() => clearMocks());
 
@@ -384,6 +477,31 @@ describe("GET /orgs/domains/traffic-history", () => {
       month: "2026-01-01",
       organicTraffic: 5820145,
     });
+  });
+
+  it("surfaces an implausible latest snapshot as no-reliable-data (nulled value + flag)", async () => {
+    setMockResult(LATEST_VIEW, [
+      {
+        ...snapshotRow("wsj.com"),
+        traffic_monthly_avg: 4802,
+        traffic_implausible: true,
+        traffic_implausible_reason: "organic traffic incoherent with domain authority (DR 92, under 5000 monthly organic)",
+      },
+    ]);
+    setMockResult(MONTHLY_TABLE, monthlyRows("wsj.com"));
+
+    const res = await withOrg(
+      request(app).get("/orgs/domains/traffic-history?domains=wsj.com")
+    );
+    expect(res.status).toBe(200);
+    expect(res.body[0].hasData).toBe(false);
+    expect(res.body[0].trafficMonthlyAvg).toBeNull();
+    expect(res.body[0].trafficValueMonthlyAvg).toBeNull();
+    expect(res.body[0].monthlyOrganicTraffic).toEqual([]);
+    expect(res.body[0].trafficImplausible).toBe(true);
+    expect(res.body[0].trafficImplausibleReason).toContain("DR 92");
+    // The capture timestamp is retained so the worker can apply its re-scrape cooldown.
+    expect(res.body[0].latestDataCapturedAt).not.toBeNull();
   });
 
   it("returns hasData:false + empty series for a never-scraped domain", async () => {

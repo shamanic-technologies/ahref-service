@@ -81,6 +81,15 @@ export const trafficResponseSchema = z
     topCountries: z.unknown().nullable(),
     topKeywords: z.unknown().nullable(),
     monthlyOrganicTraffic: z.array(trafficMonthlySchema),
+    trafficImplausible: z
+      .boolean()
+      .describe(
+        "True when the latest scrape was rejected as partial/wrong-scope (a tiny, untrustworthy figure). The value fields are nulled and the series emptied; the domain is re-scraped on a later request."
+      ),
+    trafficImplausibleReason: z
+      .string()
+      .nullable()
+      .describe("Why the latest scrape was rejected, or null when trustworthy."),
   })
   .openapi("TrafficResponse");
 
