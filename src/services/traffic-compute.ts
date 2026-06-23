@@ -12,6 +12,8 @@ import { authorize } from "./billing";
 import { addCost, closeRun, createChildRun, setCostStatus } from "./runs";
 import {
   enqueueDomainMetricJobs,
+  ensureDomainMetricReaper,
+  registerDomainMetricProcessor,
   scheduleDomainMetricWorker,
   type DomainMetricJob,
 } from "./domain-metric-jobs";
@@ -149,7 +151,7 @@ const needsTrafficScrape = (status: TrafficStatus): boolean => {
   );
 };
 
-const processOrgTrafficJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
+export const processOrgTrafficJobs = async (pool: Pool, jobs: DomainMetricJob[]) => {
   if (jobs.length === 0) return;
 
   const domains = [...new Set(jobs.map((job) => job.domain))];
@@ -186,10 +188,14 @@ export const computeTraffic = async (
   ];
 
   if (domainsToQueue.length > 0) {
+    registerDomainMetricProcessor("traffic", (jobs) => processOrgTrafficJobs(pool, jobs));
     await enqueueDomainMetricJobs(pool, "traffic", domainsToQueue, ctx);
     scheduleDomainMetricWorker(pool, "traffic", ctx.orgId, (jobs) =>
       processOrgTrafficJobs(pool, jobs)
     );
+    // Arm the reaper so an orphaned/hung job (process restart, cold-start hang)
+    // self-heals on the next interaction without a fresh click.
+    ensureDomainMetricReaper(pool);
   }
 
   return before;

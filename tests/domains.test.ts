@@ -118,6 +118,30 @@ describe("GET /orgs/domains/dr-status", () => {
     );
     expect(viewCall![1]).toEqual(["blog.example.com", "example.com"]);
   });
+
+  it("skips invalid entries (e.g. a '-' placeholder) and serves the valid rest", async () => {
+    setMockResult(DR_VIEW, [drRow("example.com")]);
+
+    const res = await withOrg(
+      request(app).get("/orgs/domains/dr-status?domains=-,example.com")
+    );
+    expect(res.status).toBe(200);
+
+    // The view was queried with ONLY the valid normalized domain — the "-" was
+    // dropped, not allowed to poison the batch.
+    const viewCall = getMockPool().query.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && c[0].includes(DR_VIEW)
+    );
+    expect(viewCall![1]).toEqual(["example.com"]);
+  });
+
+  it("returns 400 when EVERY domain is invalid", async () => {
+    const res = await withOrg(
+      request(app).get("/orgs/domains/dr-status?domains=-,not%20a%20domain")
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/domain/);
+  });
 });
 
 describe("GET /internal/domains/dr-stale", () => {
