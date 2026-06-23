@@ -167,44 +167,25 @@ interface TrafficSilverInput {
   topKeywords: unknown;
 }
 
-/** Latest known Ahrefs Domain Rating for a domain (authority cross-signal). */
-const getLatestDomainRating = async (
-  pool: Pool,
-  domain: string
-): Promise<number | null> => {
-  const result = await pool.query(
-    `SELECT authority_domain_rating
-     FROM apify_ahref
-     WHERE domain = $1 AND data_type = 'authority'
-       AND authority_domain_rating IS NOT NULL
-     ORDER BY data_captured_at DESC
-     LIMIT 1`,
-    [domain]
-  );
-  return (result.rows[0]?.authority_domain_rating as number | null) ?? null;
-};
-
 /**
  * Deterministically project a traffic bronze row into the silver layer
  * (no LLM — structured JSON). Two upserts, both idempotent:
  *  - `domain_traffic_snapshot`: the rich current values for this scrape
  *    (deduped on the capture timestamp). Tagged with a plausibility verdict so a
- *    partial / wrong-scope scrape (tiny confident number) is invalidated, not
+ *    partial / empty scrape (a number with no page evidence) is invalidated, not
  *    surfaced as success — see `assessTrafficPlausibility`.
  *  - `domain_traffic_monthly`: one row per (domain, month) exploded from
  *    `trafficHistory`, last-write-wins by the bronze `data_captured_at` so an
  *    older scrape never clobbers a month a newer scrape already wrote. SKIPPED
- *    for an implausible scrape (its months are wrong-scoped too).
+ *    for an implausible scrape.
  */
 export const promoteTrafficSilver = async (
   pool: Pool,
   input: TrafficSilverInput
 ): Promise<void> => {
-  const authorityDomainRating = await getLatestDomainRating(pool, input.domain);
   const { implausible, reason } = assessTrafficPlausibility({
     trafficMonthlyAvg: input.trafficMonthlyAvg,
     topPages: input.topPages,
-    authorityDomainRating,
   });
 
   await pool.query(

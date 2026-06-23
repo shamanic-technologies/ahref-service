@@ -205,7 +205,7 @@ ORDER BY domain, data_captured_at DESC;
 -- view prefers; the flagged historical row is left intact for audit.
 -- ----------------------------------------------------------------------------
 
--- Rule A — a positive traffic figure with no ranking-page evidence.
+-- Structural rule — a positive traffic figure with no ranking-page evidence.
 UPDATE domain_traffic_snapshot s
 SET traffic_implausible = true,
     traffic_implausible_reason = 'traffic figure with no ranking-page evidence (empty topPages)'
@@ -217,22 +217,14 @@ WHERE s.traffic_implausible = false
     OR jsonb_array_length(s.top_pages) = 0
   );
 
--- Rule B — organic traffic incoherent with the domain's authority (DR ≥ 40 but
--- under 5000 monthly organic).
-WITH latest_dr AS (
-  SELECT DISTINCT ON (domain) domain, authority_domain_rating AS dr
-  FROM apify_ahref
-  WHERE data_type = 'authority' AND authority_domain_rating IS NOT NULL
-  ORDER BY domain, data_captured_at DESC
-)
-UPDATE domain_traffic_snapshot s
-SET traffic_implausible = true,
-    traffic_implausible_reason = 'organic traffic incoherent with domain authority (DR ' || d.dr || ', under 5000 monthly organic)'
-FROM latest_dr d
-WHERE s.domain = d.domain
-  AND s.traffic_implausible = false
-  AND d.dr >= 40
-  AND (s.traffic_monthly_avg IS NULL OR s.traffic_monthly_avg < 5000);
+-- Reconcile: the former DR-vs-traffic authority cross-check was removed because
+-- (post scope fix) it only mis-fired on genuinely small but authoritative niche
+-- sites — wrongly hiding correct data. Un-flag any row it had flagged.
+UPDATE domain_traffic_snapshot
+SET traffic_implausible = false,
+    traffic_implausible_reason = NULL
+WHERE traffic_implausible = true
+  AND traffic_implausible_reason LIKE 'organic traffic incoherent with domain authority%';
 
 -- Fire-and-forget compute queue. One active job per org/domain/metric prevents
 -- repeated dashboard clicks from fanning out duplicate Apify runs.
