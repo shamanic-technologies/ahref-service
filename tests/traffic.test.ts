@@ -366,7 +366,6 @@ describe("POST /internal/domains/domain-rating (traffic → silver promotion)", 
 describe("traffic plausibility guard (silver promotion)", () => {
   beforeEach(() => clearMocks());
 
-  const DR_QUERY_KEY = "authority_domain_rating IS NOT NULL";
   const snapshotInsertCall = () =>
     getMockPool().query.mock.calls.find((c: unknown[]) =>
       (c[0] as string).includes("INSERT INTO domain_traffic_snapshot")
@@ -399,36 +398,32 @@ describe("traffic plausibility guard (silver promotion)", () => {
     expect(monthlyInserts()).toHaveLength(0);
   });
 
-  it("flags organic traffic incoherent with a high domain authority (DR cross-check)", async () => {
-    // wsj.com signature: DR 92 but only 4,802 monthly organic, with non-empty
-    // top pages (so only the authority rule can catch it).
-    setMockResult(DR_QUERY_KEY, [{ authority_domain_rating: 92 }]);
-
+  it("stores a small but page-backed scrape as plausible (no DR cross-check)", async () => {
+    // A genuinely small niche site (low traffic) with real ranking pages must
+    // NOT be flagged — the removed DR rule used to mis-fire on exactly this.
     const res = await internal(
       request(app)
         .post("/internal/domains/domain-rating")
         .send({
-          domain: "wsj.com",
+          domain: "tiger21.com",
           dataType: "traffic",
           dataCapturedAt: "2026-06-09T00:00:00Z",
           rawData: { searchType: "traffic_overview" },
-          trafficMonthlyAvg: 4802,
-          costMonthlyAvg: 921818,
+          trafficMonthlyAvg: 4716,
+          costMonthlyAvg: 120000,
           trafficHistory: TRAFFIC_HISTORY,
-          trafficTopPages: [{ url: "https://wsj.com/subscribe", traffic: 4174, share: 91.4 }],
+          trafficTopPages: [{ url: "https://tiger21.com/members", traffic: 1200, share: 25 }],
         })
     );
     expect(res.status).toBe(201);
 
     const values = snapshotInsertCall()![1] as unknown[];
-    expect(values[8]).toBe(true);
-    expect(String(values[9])).toContain("DR 92");
-    expect(monthlyInserts()).toHaveLength(0);
+    expect(values[8]).toBe(false);
+    expect(values[9]).toBeNull();
+    expect(monthlyInserts()).toHaveLength(2);
   });
 
-  it("stores a real high-traffic scrape as plausible (DR known, traffic coherent)", async () => {
-    setMockResult(DR_QUERY_KEY, [{ authority_domain_rating: 93 }]);
-
+  it("stores a real high-traffic scrape as plausible", async () => {
     const res = await internal(
       request(app)
         .post("/internal/domains/domain-rating")
@@ -482,16 +477,17 @@ describe("GET /orgs/domains/traffic-history", () => {
   it("surfaces an implausible latest snapshot as no-reliable-data (nulled value + flag)", async () => {
     setMockResult(LATEST_VIEW, [
       {
-        ...snapshotRow("wsj.com"),
-        traffic_monthly_avg: 4802,
+        ...snapshotRow("ft.com"),
+        traffic_monthly_avg: 196,
+        top_pages: [],
         traffic_implausible: true,
-        traffic_implausible_reason: "organic traffic incoherent with domain authority (DR 92, under 5000 monthly organic)",
+        traffic_implausible_reason: "traffic figure with no ranking-page evidence (empty topPages)",
       },
     ]);
-    setMockResult(MONTHLY_TABLE, monthlyRows("wsj.com"));
+    setMockResult(MONTHLY_TABLE, monthlyRows("ft.com"));
 
     const res = await withOrg(
-      request(app).get("/orgs/domains/traffic-history?domains=wsj.com")
+      request(app).get("/orgs/domains/traffic-history?domains=ft.com")
     );
     expect(res.status).toBe(200);
     expect(res.body[0].hasData).toBe(false);
@@ -499,7 +495,7 @@ describe("GET /orgs/domains/traffic-history", () => {
     expect(res.body[0].trafficValueMonthlyAvg).toBeNull();
     expect(res.body[0].monthlyOrganicTraffic).toEqual([]);
     expect(res.body[0].trafficImplausible).toBe(true);
-    expect(res.body[0].trafficImplausibleReason).toContain("DR 92");
+    expect(res.body[0].trafficImplausibleReason).toContain("no ranking-page evidence");
     // The capture timestamp is retained so the worker can apply its re-scrape cooldown.
     expect(res.body[0].latestDataCapturedAt).not.toBeNull();
   });
