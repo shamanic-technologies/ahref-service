@@ -171,6 +171,14 @@ CREATE TABLE IF NOT EXISTS domain_traffic_snapshot (
 CREATE INDEX IF NOT EXISTS idx_domain_traffic_snapshot_domain_captured
   ON domain_traffic_snapshot(domain, data_captured_at DESC);
 
+-- Plausibility verdict: a partial / wrong-scope scrape (tiny confident number)
+-- is invalidated here rather than surfaced as success. Set at promotion time
+-- (assessTrafficPlausibility) and backfilled below for already-stored rows.
+ALTER TABLE domain_traffic_snapshot
+  ADD COLUMN IF NOT EXISTS traffic_implausible BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE domain_traffic_snapshot
+  ADD COLUMN IF NOT EXISTS traffic_implausible_reason TEXT;
+
 -- Gold: latest traffic snapshot per domain (dashboard read path).
 CREATE OR REPLACE VIEW v_domain_traffic_latest AS
 SELECT DISTINCT ON (domain)
@@ -180,9 +188,51 @@ SELECT DISTINCT ON (domain)
   traffic_value_monthly_avg,
   top_pages,
   top_countries,
-  top_keywords
+  top_keywords,
+  traffic_implausible,
+  traffic_implausible_reason
 FROM domain_traffic_snapshot
 ORDER BY domain, data_captured_at DESC;
+
+-- ----------------------------------------------------------------------------
+-- BACKFILL: invalidate already-stored implausible traffic snapshots so the
+-- corrected pipeline never surfaces a silently-wrong tiny number. Mirrors
+-- assessTrafficPlausibility (Rule A structural + Rule B authority coherence).
+-- Idempotent (only flips false→true on matching rows; converges) and reversible
+-- (flag-based — undo with: UPDATE domain_traffic_snapshot SET
+--  traffic_implausible=false, traffic_implausible_reason=NULL WHERE ...).
+-- A later correct re-scrape inserts a NEW snapshot row (plausible) which the
+-- view prefers; the flagged historical row is left intact for audit.
+-- ----------------------------------------------------------------------------
+
+-- Rule A — a positive traffic figure with no ranking-page evidence.
+UPDATE domain_traffic_snapshot s
+SET traffic_implausible = true,
+    traffic_implausible_reason = 'traffic figure with no ranking-page evidence (empty topPages)'
+WHERE s.traffic_implausible = false
+  AND s.traffic_monthly_avg > 0
+  AND (
+    s.top_pages IS NULL
+    OR jsonb_typeof(s.top_pages) <> 'array'
+    OR jsonb_array_length(s.top_pages) = 0
+  );
+
+-- Rule B — organic traffic incoherent with the domain's authority (DR ≥ 40 but
+-- under 5000 monthly organic).
+WITH latest_dr AS (
+  SELECT DISTINCT ON (domain) domain, authority_domain_rating AS dr
+  FROM apify_ahref
+  WHERE data_type = 'authority' AND authority_domain_rating IS NOT NULL
+  ORDER BY domain, data_captured_at DESC
+)
+UPDATE domain_traffic_snapshot s
+SET traffic_implausible = true,
+    traffic_implausible_reason = 'organic traffic incoherent with domain authority (DR ' || d.dr || ', under 5000 monthly organic)'
+FROM latest_dr d
+WHERE s.domain = d.domain
+  AND s.traffic_implausible = false
+  AND d.dr >= 40
+  AND (s.traffic_monthly_avg IS NULL OR s.traffic_monthly_avg < 5000);
 
 -- Fire-and-forget compute queue. One active job per org/domain/metric prevents
 -- repeated dashboard clicks from fanning out duplicate Apify runs.
