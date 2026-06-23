@@ -12,7 +12,7 @@ import {
   trafficComputeBodySchema,
   aiVisibilityBodySchema,
 } from "../schemas/apify-ahref";
-import { normalizeDomain } from "../lib/domain";
+import { normalizeDomainsSkippingInvalid } from "../lib/domain";
 
 /**
  * Org-scoped routes — mounted at /orgs/domains (requires x-api-key + x-org-id).
@@ -41,14 +41,17 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
 
-      let domains: string[];
-      try {
-        // Normalize + dedupe so www/non-www and casing collapse to one key.
-        domains = [...new Set(inputs.map(normalizeDomain))];
-      } catch (err) {
-        res
-          .status(400)
-          .json({ error: err instanceof Error ? err.message : "Invalid domain" });
+      // Pure read: skip invalid entries (e.g. a "-" placeholder) instead of
+      // failing the whole batch. Normalize + dedupe so www/non-www and casing
+      // collapse to one key.
+      const { domains, skipped } = normalizeDomainsSkippingInvalid(inputs);
+      if (skipped.length > 0) {
+        console.warn(
+          `[ahref-service] dr-status: skipping invalid domain(s): ${skipped.join(", ")}`
+        );
+      }
+      if (domains.length === 0) {
+        res.status(400).json({ error: "no valid domain in domains query parameter" });
         return;
       }
 
@@ -103,14 +106,17 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
 
-      let domains: string[];
-      try {
-        // Normalize + dedupe so www/non-www and casing collapse to one key.
-        domains = [...new Set(inputs.map(normalizeDomain))];
-      } catch (err) {
-        res
-          .status(400)
-          .json({ error: err instanceof Error ? err.message : "Invalid domain" });
+      // Pure read: skip invalid entries (e.g. a "-" placeholder) instead of
+      // failing the whole batch. Normalize + dedupe so www/non-www and casing
+      // collapse to one key.
+      const { domains, skipped } = normalizeDomainsSkippingInvalid(inputs);
+      if (skipped.length > 0) {
+        console.warn(
+          `[ahref-service] traffic-history: skipping invalid domain(s): ${skipped.join(", ")}`
+        );
+      }
+      if (domains.length === 0) {
+        res.status(400).json({ error: "no valid domain in domains query parameter" });
         return;
       }
 
@@ -166,14 +172,17 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
 
-      let domains: string[];
-      try {
-        // Normalize + dedupe so www/non-www and casing collapse to one key.
-        domains = [...new Set(inputs.map(normalizeDomain))];
-      } catch (err) {
-        res
-          .status(400)
-          .json({ error: err instanceof Error ? err.message : "Invalid domain" });
+      // Pure read: skip invalid entries (e.g. a "-" placeholder) instead of
+      // failing the whole batch. Normalize + dedupe so www/non-www and casing
+      // collapse to one key.
+      const { domains, skipped } = normalizeDomainsSkippingInvalid(inputs);
+      if (skipped.length > 0) {
+        console.warn(
+          `[ahref-service] ai-visibility: skipping invalid domain(s): ${skipped.join(", ")}`
+        );
+      }
+      if (domains.length === 0) {
+        res.status(400).json({ error: "no valid domain in domains query parameter" });
         return;
       }
 

@@ -57,3 +57,38 @@ export const normalizeDomain = (input: string): string => {
 
   return host;
 };
+
+/**
+ * Normalize a batch of raw domain inputs, SKIPPING any that fail validation
+ * instead of throwing on the first bad one.
+ *
+ * The pure READ endpoints (dr-status, traffic-history, ai-visibility GET) are
+ * unmetered batch lookups: a single junk entry — e.g. a "-" placeholder a
+ * caller emits for a missing domain — must NOT poison the whole batch. Invalid
+ * inputs are dropped and surfaced in `skipped` (so the route can log them);
+ * valid inputs are normalized and deduped (www/casing collapse to one key).
+ *
+ * The metered POST compute endpoints do NOT use this — they keep failing loud
+ * on bad input via `normalizeDomain`.
+ */
+export const normalizeDomainsSkippingInvalid = (
+  inputs: string[]
+): { domains: string[]; skipped: string[] } => {
+  const domains: string[] = [];
+  const seen = new Set<string>();
+  const skipped: string[] = [];
+  for (const input of inputs) {
+    let key: string;
+    try {
+      key = normalizeDomain(input);
+    } catch {
+      skipped.push(input);
+      continue;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      domains.push(key);
+    }
+  }
+  return { domains, skipped };
+};
