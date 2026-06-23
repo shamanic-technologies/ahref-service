@@ -10,7 +10,10 @@ import {
   waitForDomainMetricWorkersForTest,
   resetDomainMetricWorkersForTest,
   setDomainMetricBatchTimeoutForTest,
+  setDomainMetricBatchSizeForTest,
+  setDomainMetricConcurrencyForTest,
 } from "../src/services/domain-metric-jobs";
+import type { DomainMetricJob } from "../src/services/domain-metric-jobs";
 
 const pool = getMockPool() as unknown as Pool;
 const ORG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -118,6 +121,45 @@ describe("recoverDomainMetricQueueOnce (boot / on-read drain)", () => {
 
     expect(reclaimed).toBe(1);
     expect(getMetricJobs()[0].status).toBe("succeeded");
+  });
+});
+
+describe("throughput: parallel claim-loops", () => {
+  it("drains the queue with bounded concurrency, processing every job exactly once", async () => {
+    setDomainMetricConcurrencyForTest(4);
+    setDomainMetricBatchSizeForTest(10);
+
+    for (let i = 0; i < 50; i++) {
+      seedMetricJob({
+        orgId: ORG_ID,
+        metric: "dr",
+        domain: `d${i}.com`,
+        status: "pending",
+      });
+    }
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const processedIds: string[] = [];
+
+    const processor = async (jobs: DomainMetricJob[]) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      // Yield so concurrent loops actually overlap.
+      await new Promise((r) => setTimeout(r, 5));
+      for (const job of jobs) processedIds.push(job.id);
+      inFlight -= 1;
+    };
+
+    await processDomainMetricJobs(pool, "dr", ORG_ID, processor);
+
+    // Every job processed exactly once (FOR UPDATE SKIP LOCKED → no double-claim).
+    expect(processedIds.length).toBe(50);
+    expect(new Set(processedIds).size).toBe(50);
+    // All drained to succeeded.
+    expect(getMetricJobs().every((j) => j.status === "succeeded")).toBe(true);
+    // Concurrency actually engaged (more than one loop in-flight at once).
+    expect(maxInFlight).toBeGreaterThan(1);
   });
 });
 
