@@ -15,6 +15,7 @@ import {
   aiVisibilityBodySchema,
   aiVisibilityResponseSchema,
   aiVisibilityCachedResponseSchema,
+  computeErrorResponseSchema,
 } from "./schemas/apify-ahref";
 
 const registry = new OpenAPIRegistry();
@@ -117,6 +118,15 @@ registry.registerPath({
         },
       },
     },
+    502: {
+      description:
+        "Downstream / cost / scrape failure. A billing refusal for a sales funnel max budget carries billing's `reason` + `sales_funnel_cap` verbatim.",
+      content: {
+        "application/json": {
+          schema: computeErrorResponseSchema,
+        },
+      },
+    },
   },
   security: [{ apiKey: [] }],
 });
@@ -170,6 +180,15 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.array(trafficResponseSchema),
+        },
+      },
+    },
+    502: {
+      description:
+        "Downstream / cost / scrape failure. A billing refusal for a sales funnel max budget carries billing's `reason` + `sales_funnel_cap` verbatim.",
+      content: {
+        "application/json": {
+          schema: computeErrorResponseSchema,
         },
       },
     },
@@ -230,6 +249,15 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: aiVisibilityResponseSchema,
+        },
+      },
+    },
+    502: {
+      description:
+        "Downstream / cost / scrape failure. A billing refusal for a sales funnel max budget carries billing's `reason` + `sales_funnel_cap` verbatim.",
+      content: {
+        "application/json": {
+          schema: computeErrorResponseSchema,
         },
       },
     },

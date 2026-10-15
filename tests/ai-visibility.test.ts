@@ -33,6 +33,7 @@ let calls: Call[];
 
 interface Overrides {
   authorizeSufficient?: boolean;
+  authorizeExtra?: Record<string, unknown>;
   provisionStatus?: number;
   keyStatus?: number;
   apifyRunStatus?: string;
@@ -107,6 +108,7 @@ beforeEach(() => {
         sufficient: overrides.authorizeSufficient ?? true,
         balance_cents: "100000",
         required_cents: "50",
+        ...(overrides.authorizeExtra ?? {}),
       });
     }
 
@@ -312,6 +314,41 @@ describe("POST /orgs/domains/ai-visibility", () => {
     expect(res.status).toBe(502);
     expect(idxOf(apifyRunCall)).toBe(-1);
     expect(idxOf((c) => c.url.includes("/costs/") && c.method === "PATCH")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("502 on a real balance shortfall (no reason) — body unchanged", async () => {
+    overrides.authorizeSufficient = false;
+    const res = await withOrg(
+      request(app).post("/orgs/domains/ai-visibility").send({ domain: "example.com" })
+    );
+    expect(res.status).toBe(502);
+    expect(res.body).toStrictEqual({
+      error: "Failed to compute AI-visibility",
+      detail:
+        "[ahref-service] billing-service authorize: insufficient balance (balance=100000¢, required=50¢)",
+    });
+  });
+
+  it("502 naming the sales funnel max budget, billing's reason + sales_funnel_cap verbatim", async () => {
+    const cap = {
+      salesFunnelId: "sf-1",
+      salesFunnelCampaignId: "sfc-1",
+      amountCents: 5000,
+      period: "month",
+      consumedCents: 4990,
+      reservedCents: 0,
+    };
+    overrides.authorizeSufficient = false;
+    overrides.authorizeExtra = { reason: "sales_funnel_max_budget_reached", sales_funnel_cap: cap };
+    const res = await withOrg(
+      request(app).post("/orgs/domains/ai-visibility").send({ domain: "example.com" })
+    );
+    expect(res.status).toBe(502);
+    expect(res.body.reason).toBe("sales_funnel_max_budget_reached");
+    expect(res.body.sales_funnel_cap).toStrictEqual(cap);
+    expect(res.body.detail).toContain("sales funnel max budget reached");
+    expect(res.body.detail).not.toContain("insufficient balance");
+    expect(idxOf(apifyRunCall)).toBe(-1);
   });
 
   it("502 when provision fails (422 unknown cost) — no authorize, no Apify", async () => {

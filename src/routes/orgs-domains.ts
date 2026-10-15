@@ -13,6 +13,7 @@ import {
   aiVisibilityBodySchema,
 } from "../schemas/apify-ahref";
 import { normalizeDomainsSkippingInvalid } from "../lib/domain";
+import { billingRefusalFields } from "../services/billing";
 
 /**
  * Org-scoped routes — mounted at /orgs/domains (requires x-api-key + x-org-id).
@@ -85,7 +86,7 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
       console.error("[ahref-service] Error computing DR:", error);
-      res.status(502).json({ error: "Failed to compute DR", detail: message });
+      res.status(502).json({ error: "Failed to compute DR", detail: message, ...billingRefusalFields(error) });
     }
   });
 
@@ -150,7 +151,7 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
       console.error("[ahref-service] Error computing traffic:", error);
-      res.status(502).json({ error: "Failed to compute traffic", detail: message });
+      res.status(502).json({ error: "Failed to compute traffic", detail: message, ...billingRefusalFields(error) });
     }
   });
 
@@ -221,7 +222,7 @@ export const createOrgsDomainsRouter = () => {
         return;
       }
       console.error("[ahref-service] Error computing AI-visibility:", error);
-      res.status(502).json({ error: "Failed to compute AI-visibility", detail: message });
+      res.status(502).json({ error: "Failed to compute AI-visibility", detail: message, ...billingRefusalFields(error) });
     }
   });
 
