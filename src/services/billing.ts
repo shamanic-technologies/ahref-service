@@ -47,10 +47,54 @@ export const authorize = async (
     sufficient: boolean;
     balance_cents: string;
     required_cents: string;
+    reason?: string;
+    sales_funnel_cap?: Record<string, unknown>;
   };
   if (!data.sufficient) {
-    throw new Error(
+    if (data.reason) {
+      // A sales funnel (campaign) MAX BUDGET refusal, not a balance shortfall:
+      // the org may have credit. Name the real cause and carry billing's
+      // `reason` + `sales_funnel_cap` verbatim so the caller can tell
+      // "raise this campaign's max budget" apart from "add credit".
+      throw new BillingRefusedError(
+        `[ahref-service] billing-service authorize: sales funnel max budget reached (reason=${data.reason}, balance=${data.balance_cents}¢, required=${data.required_cents}¢)`,
+        data.reason,
+        data.sales_funnel_cap
+      );
+    }
+    throw new BillingRefusedError(
       `[ahref-service] billing-service authorize: insufficient balance (balance=${data.balance_cents}¢, required=${data.required_cents}¢)`
     );
   }
+};
+
+/**
+ * billing-service answered `sufficient:false`. `reason` (+ `salesFunnelCap`)
+ * is set ONLY when billing refused for a sales funnel's max budget; a plain
+ * balance shortfall carries neither, and its message is unchanged.
+ */
+export class BillingRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly reason?: string,
+    readonly salesFunnelCap?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "BillingRefusedError";
+  }
+}
+
+/**
+ * Extra fields for a route's error body: billing's `reason` + `sales_funnel_cap`
+ * verbatim on a funnel-cap refusal, nothing otherwise (so every other error
+ * body stays byte-identical).
+ */
+export const billingRefusalFields = (
+  error: unknown
+): { reason?: string; sales_funnel_cap?: Record<string, unknown> } => {
+  if (!(error instanceof BillingRefusedError) || !error.reason) return {};
+  return {
+    reason: error.reason,
+    ...(error.salesFunnelCap !== undefined ? { sales_funnel_cap: error.salesFunnelCap } : {}),
+  };
 };

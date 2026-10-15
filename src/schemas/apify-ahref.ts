@@ -193,3 +193,22 @@ export const lowDrResponseSchema = z
     hasLowDomainRating: z.boolean().nullable(),
   })
   .openapi("LowDrResponse");
+
+export const computeErrorResponseSchema = z
+  .object({
+    error: z.string(),
+    detail: z.string().optional(),
+    reason: z
+      .string()
+      .optional()
+      .describe(
+        "billing-service's refusal reason, verbatim. Present ONLY when billing refused because a sales funnel (campaign) MAX BUDGET was reached (`sales_funnel_max_budget_reached` / `sales_funnel_max_budget_unreadable`): raise that campaign's max budget, adding credit changes nothing. Absent on a balance shortfall."
+      ),
+    sales_funnel_cap: z
+      .record(z.unknown())
+      .optional()
+      .describe(
+        "billing-service's `sales_funnel_cap` object, verbatim ({ salesFunnelId, salesFunnelCampaignId, amountCents, period, consumedCents, reservedCents }). Present only with `reason`."
+      ),
+  })
+  .openapi("ComputeErrorResponse");
