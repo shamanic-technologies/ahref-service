@@ -47,15 +47,32 @@ const buildPlatformHeaders = (apiKey: string): Record<string, string> => ({
 });
 
 /**
- * Create this service's own run for the DR-compute request. The inbound
+ * Support function of a run opened with NO caller run (cost-accounting
+ * doctrine, runs-service ledger): a domain metric read (DR, traffic, AI
+ * visibility) produces no catalogue outcome. Under a caller's run, its cost
+ * rides whatever that run declares (or the caller's own support mark); with no
+ * caller run it is a direct product-feature read and is marked so at creation,
+ * never left "undeclared" in the ledger reconciliation.
+ */
+export const DIRECT_READ_SUPPORT = {
+  kind: "product_feature",
+  reason: "domain metric read requested with no caller run (produces no outcome by design)",
+} as const;
+
+/**
+ * Create this service's own run for a domain-metric request. The inbound
  * caller's run id (ctx.runId) is forwarded as x-run-id, so runs-service links
- * the new run as its child (parent_run_id).
+ * the new run as its child (parent_run_id). Without one, the run is a root and
+ * is marked support (DIRECT_READ_SUPPORT).
  */
 export const createChildRun = async (taskName: string, ctx: OrgContext): Promise<string> => {
   const { runsServiceUrl, runsServiceApiKey } = getDownstreamConfig();
+  const body = ctx.runId
+    ? { serviceName: SERVICE_NAME, taskName }
+    : { serviceName: SERVICE_NAME, taskName, support: DIRECT_READ_SUPPORT };
   const data = (await post(
     `${runsServiceUrl}/v1/runs`,
-    { serviceName: SERVICE_NAME, taskName },
+    body,
     buildServiceHeaders(runsServiceApiKey, ctx)
   )) as { id: string };
   return data.id;
